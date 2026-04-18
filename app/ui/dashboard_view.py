@@ -23,7 +23,7 @@ from app.ui.widgets.chart_canvas import ChartCanvas
 from app.utils.formatting import format_currency, format_date_br, format_month_br
 
 
-_CARD_W = 168
+_CARD_MIN_W = 168
 _KPI_COLS = 4
 
 
@@ -84,21 +84,16 @@ class DashboardView(QWidget):
         kpi_grid.setHorizontalSpacing(12)
         kpi_grid.setVerticalSpacing(12)
         for c in range(_KPI_COLS):
-            kpi_grid.setColumnMinimumWidth(c, _CARD_W)
-        align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+            kpi_grid.setColumnMinimumWidth(c, _CARD_MIN_W)
+            kpi_grid.setColumnStretch(c, 1)
+        align = Qt.AlignmentFlag.AlignTop
         for col, w in enumerate(line1):
             kpi_grid.addWidget(w, 0, col, align)
         for col, w in enumerate(line2):
             kpi_grid.addWidget(w, 1, col, align)
 
-        kpi_row = QHBoxLayout()
-        kpi_row.setContentsMargins(0, 0, 0, 0)
-        kpi_row.setSpacing(0)
-        kpi_row.addLayout(kpi_grid)
-        kpi_row.addStretch(1)
-
         kpi_wrap = QWidget()
-        kpi_wrap.setLayout(kpi_row)
+        kpi_wrap.setLayout(kpi_grid)
         kpi_wrap.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Fixed,

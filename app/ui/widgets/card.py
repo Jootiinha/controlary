@@ -6,8 +6,9 @@ from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout
 
 
-# Tamanho fixo dos KPI compactos no dashboard (todos iguais, sem despadronizar).
-_KPI_COMPACT_W = 168
+# Dimensões dos KPI compactos no dashboard. A altura é fixa (uniformidade visual),
+# mas a largura cresce para ocupar toda a faixa disponível — com um mínimo razoável.
+_KPI_COMPACT_MIN_W = 168
 _KPI_COMPACT_H = 112
 _KPI_SUBTITLE_MAX_LINES = 2
 
@@ -100,8 +101,11 @@ class KpiCard(QFrame):
         layout.addWidget(self._subtitle)
 
         if compact:
-            self.setFixedSize(_KPI_COMPACT_W, _KPI_COMPACT_H)
-            self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            self.setFixedHeight(_KPI_COMPACT_H)
+            self.setMinimumWidth(_KPI_COMPACT_MIN_W)
+            self.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
             self._title.setFixedHeight(16)
             self._value.setFixedHeight(24)
             self._subtitle.setFixedHeight(32)
