@@ -38,5 +38,7 @@ class ChartCanvas(FigureCanvasQTAgg):
             ax.spines[spine].set_visible(False)
         if self._renderer is not None:
             self._renderer(ax)
-        self._figure.tight_layout(pad=1.15, h_pad=0.9, w_pad=0.8)
+        self._figure.tight_layout(
+            pad=1.15, h_pad=0.9, w_pad=0.8, rect=[0, 0, 0.88, 1]
+        )
         self.draw_idle()

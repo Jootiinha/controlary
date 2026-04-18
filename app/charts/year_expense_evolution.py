@@ -51,7 +51,7 @@ def plot(ax) -> None:
     ax.fill_between(x, valores, alpha=0.12, color="#4C8BF5", zorder=1)
     y_prev, y_avg = payments_prev_month_and_avg6()
     add_prev_and_avg6_lines(ax, y_prev, y_avg)
-    annotate_line_points(ax, x, valores, fontsize=6, dy=4, skip_zero=True, clip_on=False)
+    annotate_line_points(ax, x, valores, fontsize=6, dy=4, skip_zero=False, clip_on=False)
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
     ax.set_title(f"Despesas no ano {year} (por mês)")

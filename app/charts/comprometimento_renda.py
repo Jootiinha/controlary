@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 from matplotlib.ticker import FuncFormatter
 
+from app.charts.plot_labels import annotate_bars
 from app.charts.renda_vs_despesa import fetch_data as fetch_renda_gastos
 
 
@@ -16,7 +17,15 @@ def plot(ax) -> None:
         else:
             pct.append(0.0)
     x = np.arange(len(labels))
-    ax.bar(x, pct, color="#F59E0B")
+    bars = ax.bar(x, pct, color="#F59E0B")
+    annotate_bars(
+        ax,
+        bars,
+        pct,
+        fontsize=7,
+        dy=3,
+        format_value=lambda v: f"{v:.0f}%",
+    )
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=8)
     ax.set_ylabel("% da renda")

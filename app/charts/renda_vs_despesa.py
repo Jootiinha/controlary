@@ -6,6 +6,7 @@ from datetime import date
 import numpy as np
 from matplotlib.ticker import FuncFormatter
 
+from app.charts.plot_labels import annotate_bars
 from app.database.connection import transaction
 from app.services import income_sources_service
 
@@ -46,8 +47,14 @@ def plot(ax) -> None:
     labels, r_vals, g_vals = fetch_data()
     x = np.arange(len(labels))
     w = 0.35
-    ax.bar(x - w / 2, r_vals, width=w, label="Renda (ativas)", color="#22C55E")
-    ax.bar(x + w / 2, g_vals, width=w, label="Gastos (pagamentos)", color="#EF4444")
+    bars_r = ax.bar(
+        x - w / 2, r_vals, width=w, label="Renda (ativas)", color="#22C55E"
+    )
+    bars_g = ax.bar(
+        x + w / 2, g_vals, width=w, label="Gastos (pagamentos)", color="#EF4444"
+    )
+    annotate_bars(ax, bars_r, r_vals, fontsize=7, dy=3)
+    annotate_bars(ax, bars_g, g_vals, fontsize=7, dy=3)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=8)
     ax.legend(fontsize=8)

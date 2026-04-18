@@ -1,6 +1,7 @@
 """Linha do tempo do valor de um investimento (snapshots)."""
 from __future__ import annotations
 
+from app.charts.plot_labels import annotate_line_points
 from app.services import investments_service
 from app.utils.formatting import format_date_br
 
@@ -16,6 +17,7 @@ def plot_for_investment(investment_id: int):
         labels = [format_date_br(s.data) for s in snaps]
         xs = list(range(len(ys)))
         ax.plot(xs, ys, marker="o", color="#2563EB", linewidth=1.5)
+        annotate_line_points(ax, xs, ys, fontsize=7, dy=7, clip_on=True)
         ax.set_xticks(xs)
         ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=8)
         ax.set_ylabel("Valor (R$)")

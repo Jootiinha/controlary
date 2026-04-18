@@ -5,6 +5,7 @@ from datetime import date
 
 from matplotlib.ticker import FuncFormatter
 
+from app.charts.plot_labels import annotate_line_points
 from app.charts.renda_vs_despesa import fetch_data as fetch_renda_gastos
 
 
@@ -15,9 +16,10 @@ def plot(ax) -> None:
     for r, g in zip(r_vals, g_vals):
         acc += r - g
         ys.append(acc)
-    x = range(len(labels))
+    x = list(range(len(labels)))
     ax.plot(x, ys, marker="o", color="#6366F1", linewidth=1.8)
-    ax.set_xticks(list(x))
+    annotate_line_points(ax, x, ys, fontsize=7, dy=7, clip_on=True)
+    ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=8)
     ax.axhline(0, color="#9CA3AF", linewidth=0.8)
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}"))

@@ -1,6 +1,7 @@
 """Rótulos de valor (R$) em elementos de gráfico matplotlib."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, Sequence
 
 from matplotlib.axes import Axes
@@ -16,14 +17,16 @@ def annotate_bars(
     fontsize: float = 8,
     dy: float = 2,
     skip_zero: bool = False,
+    format_value: Callable[[float], str] | None = None,
 ) -> None:
-    """Coloca o valor em R$ acima de cada barra."""
+    """Coloca o rótulo acima de cada barra (R$ por padrão)."""
+    fmt = format_value or format_currency
     for bar, val in zip(bars, values):
         if skip_zero and val == 0:
             continue
         h = bar.get_height()
         ax.annotate(
-            format_currency(val),
+            fmt(val),
             xy=(bar.get_x() + bar.get_width() / 2, h),
             xytext=(0, dy),
             textcoords="offset points",

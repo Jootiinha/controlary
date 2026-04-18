@@ -14,7 +14,7 @@ def fetch_data() -> list[tuple[str, float]]:
                    COALESCE(SUM(p.valor), 0) AS t
               FROM payments p
               LEFT JOIN categories cat ON cat.id = p.category_id
-             GROUP BY nm
+             GROUP BY COALESCE(cat.nome, 'Sem categoria')
             """
         ).fetchall():
             nm = r["nm"]
@@ -27,7 +27,7 @@ def fetch_data() -> list[tuple[str, float]]:
               FROM subscriptions s
               LEFT JOIN categories cat ON cat.id = s.category_id
              WHERE s.status = 'ativa'
-             GROUP BY nm
+             GROUP BY COALESCE(cat.nome, 'Sem categoria')
             """
         ).fetchall():
             nm = r["nm"]
