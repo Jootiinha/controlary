@@ -39,7 +39,7 @@ from app.utils.formatting import format_currency, format_month_br
 
 
 FORMAS = [
-    "Pix", "Débito", "Crédito", "Dinheiro", "Boleto", "Transferência",
+    "Pix", "Débito", "Crédito", "Dinheiro", "Boleto", "Transferência", "Débito Automático",
 ]
 
 

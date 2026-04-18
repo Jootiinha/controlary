@@ -33,6 +33,7 @@ FORMAS_PAGAMENTO = [
     "Dinheiro",
     "Boleto",
     "Transferência",
+    "Débito Automático",
 ]
 
 

@@ -25,7 +25,7 @@ from app.utils.formatting import format_currency
 
 
 STATUS_ASSINATURA = ["ativa", "pausada", "cancelada"]
-FORMAS = ["Pix", "Débito", "Crédito", "Boleto", "Transferência"]
+FORMAS = ["Pix", "Débito", "Crédito", "Boleto", "Transferência", "Débito Automático"]
 
 
 class SubscriptionDialog(FormDialog):
