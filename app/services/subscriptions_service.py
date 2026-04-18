@@ -12,10 +12,12 @@ def list_all() -> List[Subscription]:
         rows = conn.execute(
             """
             SELECT s.*,
-                   COALESCE(a.nome, c.nome, s.conta_cartao) AS meio_label
+                   COALESCE(a.nome, c.nome, s.conta_cartao) AS meio_label,
+                   cat.nome AS categoria_nome
               FROM subscriptions s
               LEFT JOIN accounts a ON a.id = s.account_id
               LEFT JOIN cards c ON c.id = s.card_id
+              LEFT JOIN categories cat ON cat.id = s.category_id
              ORDER BY CASE s.status
                         WHEN 'ativa' THEN 0
                         WHEN 'pausada' THEN 1
@@ -32,10 +34,12 @@ def get(sub_id: int) -> Optional[Subscription]:
         row = conn.execute(
             """
             SELECT s.*,
-                   COALESCE(a.nome, c.nome, s.conta_cartao) AS meio_label
+                   COALESCE(a.nome, c.nome, s.conta_cartao) AS meio_label,
+                   cat.nome AS categoria_nome
               FROM subscriptions s
               LEFT JOIN accounts a ON a.id = s.account_id
               LEFT JOIN cards c ON c.id = s.card_id
+              LEFT JOIN categories cat ON cat.id = s.category_id
              WHERE s.id = ?
             """,
             (sub_id,),
@@ -43,19 +47,30 @@ def get(sub_id: int) -> Optional[Subscription]:
     return Subscription.from_row(row) if row else None
 
 
+def _legacy_categoria(conn, sub: Subscription) -> Optional[str]:
+    if sub.category_id is None:
+        return sub.categoria
+    r = conn.execute(
+        "SELECT nome FROM categories WHERE id = ?", (sub.category_id,)
+    ).fetchone()
+    return r["nome"] if r else sub.categoria
+
+
 def create(sub: Subscription) -> int:
     with transaction() as conn:
         label = _meio_label(conn, sub.account_id, sub.card_id)
+        cat_txt = _legacy_categoria(conn, sub)
         cur = conn.execute(
             """
             INSERT INTO subscriptions (
                 nome, categoria, valor_mensal, dia_cobranca,
-                forma_pagamento, conta_cartao, account_id, card_id, status, observacao
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                forma_pagamento, conta_cartao, account_id, card_id, status, observacao,
+                category_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 sub.nome,
-                sub.categoria,
+                cat_txt,
                 sub.valor_mensal,
                 sub.dia_cobranca,
                 sub.forma_pagamento,
@@ -64,6 +79,7 @@ def create(sub: Subscription) -> int:
                 sub.card_id,
                 sub.status,
                 sub.observacao,
+                sub.category_id,
             ),
         )
         return int(cur.lastrowid)
@@ -74,17 +90,18 @@ def update(sub: Subscription) -> None:
         raise ValueError("Assinatura sem id não pode ser atualizada")
     with transaction() as conn:
         label = _meio_label(conn, sub.account_id, sub.card_id)
+        cat_txt = _legacy_categoria(conn, sub)
         conn.execute(
             """
             UPDATE subscriptions
                SET nome = ?, categoria = ?, valor_mensal = ?, dia_cobranca = ?,
                    forma_pagamento = ?, conta_cartao = ?, account_id = ?, card_id = ?,
-                   status = ?, observacao = ?
+                   status = ?, observacao = ?, category_id = ?
              WHERE id = ?
             """,
             (
                 sub.nome,
-                sub.categoria,
+                cat_txt,
                 sub.valor_mensal,
                 sub.dia_cobranca,
                 sub.forma_pagamento,
@@ -93,6 +110,7 @@ def update(sub: Subscription) -> None:
                 sub.card_id,
                 sub.status,
                 sub.observacao,
+                sub.category_id,
                 sub.id,
             ),
         )
@@ -123,3 +141,17 @@ def total_active() -> tuple[int, float]:
             """
         ).fetchone()
     return int(row["qtd"] or 0), float(row["total"] or 0)
+
+
+def sum_active_not_on_card() -> float:
+    """Soma assinaturas ativas pagas em conta (sem cartão)."""
+    with transaction() as conn:
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(valor_mensal), 0) AS total
+              FROM subscriptions
+             WHERE status = 'ativa'
+               AND card_id IS NULL
+            """
+        ).fetchone()
+    return float(row["total"] or 0)

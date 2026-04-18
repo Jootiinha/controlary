@@ -58,9 +58,10 @@ def list_active() -> List[FixedExpense]:
     with transaction() as conn:
         rows = conn.execute(
             """
-            SELECT f.*, a.nome AS conta_nome
+            SELECT f.*, a.nome AS conta_nome, cat.nome AS categoria_nome
               FROM fixed_expenses f
               LEFT JOIN accounts a ON a.id = f.conta_id
+              LEFT JOIN categories cat ON cat.id = f.category_id
              WHERE f.ativo = 1
              ORDER BY f.nome COLLATE NOCASE
             """
@@ -72,9 +73,10 @@ def list_all() -> List[FixedExpense]:
     with transaction() as conn:
         rows = conn.execute(
             """
-            SELECT f.*, a.nome AS conta_nome
+            SELECT f.*, a.nome AS conta_nome, cat.nome AS categoria_nome
               FROM fixed_expenses f
               LEFT JOIN accounts a ON a.id = f.conta_id
+              LEFT JOIN categories cat ON cat.id = f.category_id
              ORDER BY f.ativo DESC, f.nome COLLATE NOCASE
             """
         ).fetchall()
@@ -85,9 +87,10 @@ def get(fe_id: int) -> Optional[FixedExpense]:
     with transaction() as conn:
         row = conn.execute(
             """
-            SELECT f.*, a.nome AS conta_nome
+            SELECT f.*, a.nome AS conta_nome, cat.nome AS categoria_nome
               FROM fixed_expenses f
               LEFT JOIN accounts a ON a.id = f.conta_id
+              LEFT JOIN categories cat ON cat.id = f.category_id
              WHERE f.id = ?
             """,
             (fe_id,),
@@ -101,8 +104,8 @@ def create(fe: FixedExpense) -> int:
             """
             INSERT INTO fixed_expenses (
                 nome, valor_mensal, dia_referencia, forma_pagamento,
-                conta_id, observacao, ativo
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                conta_id, observacao, ativo, category_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 fe.nome.strip(),
@@ -112,6 +115,7 @@ def create(fe: FixedExpense) -> int:
                 fe.conta_id,
                 fe.observacao,
                 1 if fe.ativo else 0,
+                fe.category_id,
             ),
         )
         return int(cur.lastrowid)
@@ -125,7 +129,7 @@ def update(fe: FixedExpense) -> None:
             """
             UPDATE fixed_expenses
                SET nome = ?, valor_mensal = ?, dia_referencia = ?, forma_pagamento = ?,
-                   conta_id = ?, observacao = ?, ativo = ?
+                   conta_id = ?, observacao = ?, ativo = ?, category_id = ?
              WHERE id = ?
             """,
             (
@@ -136,6 +140,7 @@ def update(fe: FixedExpense) -> None:
                 fe.conta_id,
                 fe.observacao,
                 1 if fe.ativo else 0,
+                fe.category_id,
                 fe.id,
             ),
         )

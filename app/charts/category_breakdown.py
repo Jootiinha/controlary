@@ -1,7 +1,4 @@
-"""Gráfico de distribuição: assinaturas por categoria + total de gastos avulsos.
-
-Não mistura forma de pagamento (Pix, crédito etc.) com categoria de assinatura.
-"""
+"""Distribuição por categoria: pagamentos + assinaturas ativas."""
 from __future__ import annotations
 
 from app.database.connection import transaction
@@ -9,34 +6,36 @@ from app.utils.formatting import format_currency
 
 
 def fetch_data() -> list[tuple[str, float]]:
-    """Retorna (rótulo, valor) ordenado por valor decrescente."""
     with transaction() as conn:
-        total_payments = conn.execute(
-            "SELECT COALESCE(SUM(valor), 0) AS t FROM payments"
-        ).fetchone()
-        pay = float(total_payments["t"] or 0)
-
-        rows_sub = conn.execute(
+        items: dict[str, float] = {}
+        for r in conn.execute(
             """
-            SELECT COALESCE(NULLIF(TRIM(categoria), ''), 'Assinaturas sem categoria') AS cat,
-                   SUM(valor_mensal) AS total
-              FROM subscriptions
-             WHERE status = 'ativa'
-             GROUP BY cat
+            SELECT COALESCE(cat.nome, 'Sem categoria') AS nm,
+                   COALESCE(SUM(p.valor), 0) AS t
+              FROM payments p
+              LEFT JOIN categories cat ON cat.id = p.category_id
+             GROUP BY nm
             """
-        ).fetchall()
+        ).fetchall():
+            nm = r["nm"]
+            items[nm] = items.get(nm, 0.0) + float(r["t"] or 0)
 
-    items: list[tuple[str, float]] = []
-    for r in rows_sub:
-        total = float(r["total"] or 0)
-        if total > 0:
-            items.append((r["cat"], total))
+        for r in conn.execute(
+            """
+            SELECT COALESCE(cat.nome, 'Sem categoria') AS nm,
+                   COALESCE(SUM(s.valor_mensal), 0) AS t
+              FROM subscriptions s
+              LEFT JOIN categories cat ON cat.id = s.category_id
+             WHERE s.status = 'ativa'
+             GROUP BY nm
+            """
+        ).fetchall():
+            nm = r["nm"]
+            items[nm] = items.get(nm, 0.0) + float(r["t"] or 0)
 
-    if pay > 0:
-        items.append(("Demais gastos (lançamentos avulsos)", pay))
-
-    items.sort(key=lambda x: x[1], reverse=True)
-    return items
+    out = [(k, v) for k, v in items.items() if v > 0]
+    out.sort(key=lambda x: x[1], reverse=True)
+    return out
 
 
 def plot(ax) -> None:
@@ -70,7 +69,7 @@ def plot(ax) -> None:
     ax.legend(
         _wedges,
         [f"{lbl}: {format_currency(v)}" for lbl, v in zip(labels, values)],
-        title="Categoria e valor",
+        title="Categoria",
         loc="center left",
         bbox_to_anchor=(1.02, 0.5),
         fontsize=8,
@@ -78,6 +77,5 @@ def plot(ax) -> None:
     )
 
     ax.set_title(
-        "Assinaturas por categoria + demais gastos avulsos\n"
-        "(fatias: % e R$; legenda repete nome e valor)"
+        "Categorias · pagamentos acumulados + assinaturas ativas (valor mensal)"
     )

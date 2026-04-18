@@ -15,7 +15,9 @@ class Installment:
     parcelas_pagas: int = 0
     status: str = "ativo"
     observacao: Optional[str] = None
-    cartao_nome: Optional[str] = None  # JOIN
+    category_id: Optional[int] = None
+    cartao_nome: Optional[str] = None
+    categoria_nome: Optional[str] = None
 
     @property
     def valor_total(self) -> float:
@@ -38,6 +40,8 @@ class Installment:
             cnome = row["cartao_nome"]
         elif "cartao" in keys and row["cartao"]:
             cnome = row["cartao"]
+        cat_id = row["category_id"] if "category_id" in keys else None
+        catn = row["categoria_nome"] if "categoria_nome" in keys and row["categoria_nome"] else None
         return cls(
             id=row["id"],
             nome_fatura=row["nome_fatura"],
@@ -48,5 +52,7 @@ class Installment:
             parcelas_pagas=row["parcelas_pagas"],
             status=row["status"],
             observacao=row["observacao"],
+            category_id=cat_id,
             cartao_nome=cnome,
+            categoria_nome=catn,
         )

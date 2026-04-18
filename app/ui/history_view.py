@@ -15,9 +15,13 @@ from PySide6.QtWidgets import (
 
 from app.charts import (
     category_breakdown,
+    comprometimento_renda,
     debt_evolution,
+    fluxo_acumulado,
+    investments_overview,
     invoice_evolution,
     monthly_expenses,
+    renda_vs_despesa,
 )
 from app.services import payments_service
 from app.ui.widgets.chart_canvas import ChartCanvas
@@ -30,18 +34,25 @@ class HistoryView(QWidget):
 
         lbl_title = QLabel("Histórico e análises")
         lbl_title.setObjectName("PageTitle")
-        lbl_sub = QLabel("Transações registradas e visualizações ao longo do tempo.")
+        lbl_sub = QLabel(
+            "Transações, projeções e indicadores consolidados (renda, gastos, categorias, investimentos)."
+        )
         lbl_sub.setObjectName("PageSubtitle")
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_history_tab(), "Transações")
+        self.tabs.addTab(self._build_chart_tab(renda_vs_despesa.plot), "Renda vs despesa")
+        self.tabs.addTab(self._build_chart_tab(fluxo_acumulado.plot), "Fluxo acumulado")
+        self.tabs.addTab(
+            self._build_chart_tab(comprometimento_renda.plot), "Comprometimento %"
+        )
         self.tabs.addTab(self._build_chart_tab(monthly_expenses.plot), "Gastos por mês")
         self.tabs.addTab(self._build_chart_tab(invoice_evolution.plot), "Evolução da fatura")
-        self.tabs.addTab(
-            self._build_chart_tab(category_breakdown.plot),
-            "Categorias (assinaturas + avulsos)",
-        )
+        self.tabs.addTab(self._build_chart_tab(category_breakdown.plot), "Categorias")
         self.tabs.addTab(self._build_chart_tab(debt_evolution.plot), "Saldo devedor")
+        self.tabs.addTab(
+            self._build_chart_tab(investments_overview.plot), "Investimentos"
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -51,9 +62,9 @@ class HistoryView(QWidget):
         layout.addWidget(self.tabs)
 
     def _build_history_tab(self) -> QWidget:
-        self.tbl_history = QTableWidget(0, 5)
+        self.tbl_history = QTableWidget(0, 6)
         self.tbl_history.setHorizontalHeaderLabels(
-            ["Data", "Descrição", "Conta", "Forma", "Valor"]
+            ["Data", "Descrição", "Origem", "Categoria", "Forma", "Valor"]
         )
         self.tbl_history.verticalHeader().setVisible(False)
         self.tbl_history.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -81,9 +92,13 @@ class HistoryView(QWidget):
         for i, p in enumerate(payments):
             self.tbl_history.setItem(i, 0, QTableWidgetItem(format_date_br(p.data)))
             self.tbl_history.setItem(i, 1, QTableWidgetItem(p.descricao))
-            self.tbl_history.setItem(i, 2, QTableWidgetItem(p.conta_nome or "—"))
-            self.tbl_history.setItem(i, 3, QTableWidgetItem(p.forma_pagamento))
-            self.tbl_history.setItem(i, 4, QTableWidgetItem(format_currency(p.valor)))
+            orig = p.conta_nome or p.cartao_nome or "—"
+            self.tbl_history.setItem(i, 2, QTableWidgetItem(orig))
+            self.tbl_history.setItem(
+                i, 3, QTableWidgetItem(p.categoria_nome or "—")
+            )
+            self.tbl_history.setItem(i, 4, QTableWidgetItem(p.forma_pagamento))
+            self.tbl_history.setItem(i, 5, QTableWidgetItem(format_currency(p.valor)))
 
         for i in range(1, self.tabs.count()):
             tab = self.tabs.widget(i)

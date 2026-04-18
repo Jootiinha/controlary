@@ -7,6 +7,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -15,6 +16,8 @@ from PySide6.QtWidgets import (
 
 from app.models.subscription import Subscription
 from app.services import accounts_service, cards_service, subscriptions_service
+from app.ui.categories_view import CategoryDialog
+from app.ui.widgets.category_picker import CategoryPicker
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
 from app.utils.formatting import format_currency
@@ -22,10 +25,6 @@ from app.utils.formatting import format_currency
 
 STATUS_ASSINATURA = ["ativa", "pausada", "cancelada"]
 FORMAS = ["Pix", "Débito", "Crédito", "Boleto", "Transferência"]
-CATEGORIAS = [
-    "Streaming", "Software", "Música", "Academia",
-    "Jogos", "Educação", "Notícias", "Outros",
-]
 
 
 class SubscriptionDialog(FormDialog):
@@ -36,9 +35,8 @@ class SubscriptionDialog(FormDialog):
         self.ed_nome = QLineEdit()
         self.ed_nome.setPlaceholderText("Ex.: Netflix, Spotify, ChatGPT...")
 
-        self.ed_categoria = QComboBox()
-        self.ed_categoria.setEditable(True)
-        self.ed_categoria.addItems(CATEGORIAS)
+        self._picker_cat = CategoryPicker(self, allow_empty=False)
+        self._picker_cat.connect_new_button(self._nova_categoria)
 
         self.ed_valor = QDoubleSpinBox()
         self.ed_valor.setRange(0.0, 100_000.0)
@@ -56,6 +54,11 @@ class SubscriptionDialog(FormDialog):
         self.cmb_meio = QComboBox()
         self.cmb_meio.setEditable(False)
         self._fill_meio()
+        self.cmb_meio.currentIndexChanged.connect(lambda _: self._sync_meio())
+
+        self.lbl_meio = QLabel()
+        self.lbl_meio.setWordWrap(True)
+        self.lbl_meio.setStyleSheet("color: #6B7280;")
 
         self.ed_status = QComboBox()
         self.ed_status.addItems(STATUS_ASSINATURA)
@@ -64,22 +67,19 @@ class SubscriptionDialog(FormDialog):
         self.ed_obs.setFixedHeight(70)
 
         self.form.addRow("Nome *", self.ed_nome)
-        self.form.addRow("Categoria", self.ed_categoria)
+        self.form.addRow("Categoria *", self._picker_cat)
         self.form.addRow("Valor mensal *", self.ed_valor)
         self.form.addRow("Dia da cobrança *", self.ed_dia)
         self.form.addRow("Forma de pagamento *", self.ed_forma)
         self.form.addRow("Conta ou cartão", self.cmb_meio)
+        self.form.addRow("", self.lbl_meio)
         self.form.addRow("Status *", self.ed_status)
         self.form.addRow("Observação", self.ed_obs)
 
         if sub:
             self.ed_nome.setText(sub.nome)
-            if sub.categoria:
-                idx = self.ed_categoria.findText(sub.categoria)
-                if idx >= 0:
-                    self.ed_categoria.setCurrentIndex(idx)
-                else:
-                    self.ed_categoria.setEditText(sub.categoria)
+            if sub.category_id is not None:
+                self._picker_cat.set_category_id(sub.category_id)
             self.ed_valor.setValue(sub.valor_mensal)
             self.ed_dia.setValue(sub.dia_cobranca)
             idx = self.ed_forma.findText(sub.forma_pagamento)
@@ -90,6 +90,47 @@ class SubscriptionDialog(FormDialog):
                 self.ed_status.setCurrentIndex(idx)
             self.ed_obs.setPlainText(sub.observacao or "")
             self._select_meio(sub)
+
+        self._sync_meio()
+
+    def _sync_meio(self) -> None:
+        raw = self.cmb_meio.currentData()
+        if not raw or not isinstance(raw, str):
+            self.ed_dia.setEnabled(True)
+            self.ed_forma.setEnabled(True)
+            self.lbl_meio.clear()
+            return
+        kind, _, mid = raw.partition(":")
+        if kind != "card" or not mid:
+            self.ed_dia.setEnabled(True)
+            self.ed_forma.setEnabled(True)
+            self.lbl_meio.clear()
+            return
+        try:
+            cid = int(mid)
+        except ValueError:
+            return
+        c = cards_service.get(cid)
+        if c is None:
+            return
+        self.ed_dia.setEnabled(False)
+        self.ed_dia.setValue(c.dia_pagamento_fatura)
+        self.ed_forma.setEnabled(False)
+        idx = self.ed_forma.findText("Crédito")
+        if idx >= 0:
+            self.ed_forma.setCurrentIndex(idx)
+        self.lbl_meio.setText(
+            f"Cobra na fatura do cartão (vencimento dia {c.dia_pagamento_fatura:02d}). "
+            "O calendário usa o evento da fatura mensal."
+        )
+
+    def _nova_categoria(self) -> None:
+        dlg = CategoryDialog(self)
+        if dlg.exec():
+            from app.services import categories_service
+
+            categories_service.create(dlg.payload())
+            self._picker_cat.reload_from_db()
 
     def _fill_meio(self) -> None:
         self.cmb_meio.clear()
@@ -123,6 +164,8 @@ class SubscriptionDialog(FormDialog):
             return False, "Nome é obrigatório"
         if self.ed_valor.value() <= 0:
             return False, "Valor mensal deve ser maior que zero"
+        if self._picker_cat.current_category_id() is None:
+            return False, "Selecione uma categoria"
         return True, None
 
     def payload(self) -> Subscription:
@@ -141,17 +184,25 @@ class SubscriptionDialog(FormDialog):
                         account_id = iid
                     elif kind == "card":
                         card_id = iid
+        dia = int(self.ed_dia.value())
+        forma = self.ed_forma.currentText()
+        if card_id is not None:
+            c = cards_service.get(card_id)
+            if c is not None:
+                dia = c.dia_pagamento_fatura
+            forma = "Crédito"
         return Subscription(
             id=self._sub.id if self._sub else None,
             nome=self.ed_nome.text().strip(),
-            categoria=self.ed_categoria.currentText().strip() or None,
+            categoria=None,
             valor_mensal=float(self.ed_valor.value()),
-            dia_cobranca=int(self.ed_dia.value()),
-            forma_pagamento=self.ed_forma.currentText(),
+            dia_cobranca=dia,
+            forma_pagamento=forma,
             status=self.ed_status.currentText(),
             observacao=self.ed_obs.toPlainText().strip() or None,
             account_id=account_id,
             card_id=card_id,
+            category_id=self._picker_cat.current_category_id(),
         )
 
 
@@ -174,9 +225,10 @@ class SubscriptionsView(CrudPage):
         rows = []
         for s in subscriptions_service.list_all():
             meio = s.meio_label or "—"
+            cat = s.categoria_nome or s.categoria or ""
             rows.append((s.id or 0, [
                 s.nome,
-                s.categoria or "",
+                cat,
                 format_currency(s.valor_mensal),
                 f"Dia {s.dia_cobranca:02d}",
                 s.forma_pagamento,

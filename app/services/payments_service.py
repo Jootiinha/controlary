@@ -12,9 +12,11 @@ def list_all() -> List[Payment]:
     with transaction() as conn:
         rows = conn.execute(
             """
-            SELECT p.*, a.nome AS conta_nome
+            SELECT p.*, a.nome AS conta_nome, c.nome AS cartao_nome, cat.nome AS categoria_nome
               FROM payments p
               LEFT JOIN accounts a ON a.id = p.conta_id
+              LEFT JOIN cards c ON c.id = p.cartao_id
+              LEFT JOIN categories cat ON cat.id = p.category_id
              ORDER BY date(p.data) DESC, p.id DESC
             """
         ).fetchall()
@@ -22,15 +24,16 @@ def list_all() -> List[Payment]:
 
 
 def list_between(data_ini: date, data_fim: date) -> List[Payment]:
-    """Pagamentos com `data` no intervalo inclusivo (por dia civil)."""
     s_ini = data_ini.isoformat()
     s_fim = data_fim.isoformat()
     with transaction() as conn:
         rows = conn.execute(
             """
-            SELECT p.*, a.nome AS conta_nome
+            SELECT p.*, a.nome AS conta_nome, c.nome AS cartao_nome, cat.nome AS categoria_nome
               FROM payments p
               LEFT JOIN accounts a ON a.id = p.conta_id
+              LEFT JOIN cards c ON c.id = p.cartao_id
+              LEFT JOIN categories cat ON cat.id = p.category_id
              WHERE date(p.data) BETWEEN date(?) AND date(?)
              ORDER BY date(p.data), p.id
             """,
@@ -43,9 +46,11 @@ def get(payment_id: int) -> Optional[Payment]:
     with transaction() as conn:
         row = conn.execute(
             """
-            SELECT p.*, a.nome AS conta_nome
+            SELECT p.*, a.nome AS conta_nome, c.nome AS cartao_nome, cat.nome AS categoria_nome
               FROM payments p
               LEFT JOIN accounts a ON a.id = p.conta_id
+              LEFT JOIN cards c ON c.id = p.cartao_id
+              LEFT JOIN categories cat ON cat.id = p.category_id
              WHERE p.id = ?
             """,
             (payment_id,),
@@ -53,30 +58,65 @@ def get(payment_id: int) -> Optional[Payment]:
     return Payment.from_row(row) if row else None
 
 
+def _validate_origin(payment: Payment) -> None:
+    has_acc = payment.conta_id is not None
+    has_card = payment.cartao_id is not None
+    if has_acc == has_card:
+        raise ValueError("Informe conta bancária ou cartão (apenas um)")
+
+
 def create(payment: Payment) -> int:
-    if not payment.conta_id:
-        raise ValueError("Selecione uma conta")
-    nome_conta = None
+    _validate_origin(payment)
+    conta_txt: Optional[str] = None
     with transaction() as conn:
+        if payment.conta_id is not None:
+            row = conn.execute(
+                "SELECT nome FROM accounts WHERE id = ?", (payment.conta_id,)
+            ).fetchone()
+            if not row:
+                raise ValueError("Conta inválida")
+            conta_txt = row["nome"]
+            cur = conn.execute(
+                """
+                INSERT INTO payments (
+                    valor, descricao, data, conta, conta_id, cartao_id,
+                    forma_pagamento, observacao, category_id
+                ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                """,
+                (
+                    payment.valor,
+                    payment.descricao,
+                    payment.data,
+                    conta_txt,
+                    payment.conta_id,
+                    payment.forma_pagamento,
+                    payment.observacao,
+                    payment.category_id,
+                ),
+            )
+            return int(cur.lastrowid)
         row = conn.execute(
-            "SELECT nome FROM accounts WHERE id = ?", (payment.conta_id,)
+            "SELECT nome FROM cards WHERE id = ?", (payment.cartao_id,)
         ).fetchone()
         if not row:
-            raise ValueError("Conta inválida")
-        nome_conta = row["nome"]
+            raise ValueError("Cartão inválido")
+        nome_card = row["nome"]
         cur = conn.execute(
             """
-            INSERT INTO payments (valor, descricao, data, conta, conta_id, forma_pagamento, observacao)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO payments (
+                valor, descricao, data, conta, conta_id, cartao_id,
+                forma_pagamento, observacao, category_id
+            ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)
             """,
             (
                 payment.valor,
                 payment.descricao,
                 payment.data,
-                nome_conta,
-                payment.conta_id,
+                nome_card,
+                payment.cartao_id,
                 payment.forma_pagamento,
                 payment.observacao,
+                payment.category_id,
             ),
         )
         return int(cur.lastrowid)
@@ -85,30 +125,57 @@ def create(payment: Payment) -> int:
 def update(payment: Payment) -> None:
     if payment.id is None:
         raise ValueError("Pagamento sem id não pode ser atualizado")
-    if not payment.conta_id:
-        raise ValueError("Selecione uma conta")
+    _validate_origin(payment)
     with transaction() as conn:
+        if payment.conta_id is not None:
+            row = conn.execute(
+                "SELECT nome FROM accounts WHERE id = ?", (payment.conta_id,)
+            ).fetchone()
+            if not row:
+                raise ValueError("Conta inválida")
+            nome_conta = row["nome"]
+            conn.execute(
+                """
+                UPDATE payments
+                   SET valor = ?, descricao = ?, data = ?, conta = ?, conta_id = ?,
+                       cartao_id = NULL, forma_pagamento = ?, observacao = ?, category_id = ?
+                 WHERE id = ?
+                """,
+                (
+                    payment.valor,
+                    payment.descricao,
+                    payment.data,
+                    nome_conta,
+                    payment.conta_id,
+                    payment.forma_pagamento,
+                    payment.observacao,
+                    payment.category_id,
+                    payment.id,
+                ),
+            )
+            return
         row = conn.execute(
-            "SELECT nome FROM accounts WHERE id = ?", (payment.conta_id,)
+            "SELECT nome FROM cards WHERE id = ?", (payment.cartao_id,)
         ).fetchone()
         if not row:
-            raise ValueError("Conta inválida")
-        nome_conta = row["nome"]
+            raise ValueError("Cartão inválido")
+        nome_card = row["nome"]
         conn.execute(
             """
             UPDATE payments
-               SET valor = ?, descricao = ?, data = ?, conta = ?, conta_id = ?,
-                   forma_pagamento = ?, observacao = ?
+               SET valor = ?, descricao = ?, data = ?, conta = ?, conta_id = NULL,
+                   cartao_id = ?, forma_pagamento = ?, observacao = ?, category_id = ?
              WHERE id = ?
             """,
             (
                 payment.valor,
                 payment.descricao,
                 payment.data,
-                nome_conta,
-                payment.conta_id,
+                nome_card,
+                payment.cartao_id,
                 payment.forma_pagamento,
                 payment.observacao,
+                payment.category_id,
                 payment.id,
             ),
         )

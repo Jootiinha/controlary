@@ -1,6 +1,11 @@
 .PHONY: help install install-all run icon build-mac build-win clean reset-db check
 
-PYTHON ?= python3.13
+ifeq ($(OS),Windows_NT)
+  PYTHON ?= py -3
+else
+  PYTHON ?= python3.13
+endif
+
 POETRY ?= poetry
 
 VENV_STAMP      := .venv/.installed
@@ -41,20 +46,25 @@ icon: $(VENV_STAMP_BUILD)
 	$(POETRY) run python build/make_icon.py
 
 build-mac: $(VENV_STAMP_BUILD)
+ifeq ($(OS),Windows_NT)
+	@echo "O alvo build-mac deve ser executado no macOS (bash + PyInstaller macOS)." && exit 1
+else
 	bash build/build_macos.sh
+endif
 
 build-win: $(VENV_STAMP_BUILD)
+ifeq ($(OS),Windows_NT)
 	cmd.exe /c build\\build_windows.bat
+else
+	@echo "O alvo build-win deve ser executado no Windows (cmd + PyInstaller Windows)." && exit 1
+endif
 
 check:
 	$(POETRY) check
-	$(POETRY) run python -m compileall -q app main.py build/make_icon.py
+	$(POETRY) run python -m compileall -q app main.py build/make_icon.py build/clean.py build/reset_db.py
 
 reset-db:
-	@rm -f $$HOME/.controle-financeiro/app.db
-	@echo "Banco removido. Um novo será criado no próximo 'make run'."
+	$(POETRY) run python build/reset_db.py
 
 clean:
-	rm -rf build/__pycache__ dist build/build
-	find . -type d -name "__pycache__" -prune -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
+	$(POETRY) run python build/clean.py

@@ -15,12 +15,16 @@ class FixedExpense:
     observacao: Optional[str] = None
     ativo: bool = True
     conta_nome: Optional[str] = None
+    category_id: Optional[int] = None
+    categoria_nome: Optional[str] = None
 
     @classmethod
     def from_row(cls, row) -> "FixedExpense":
         keys = list(row.keys())
         ativo = bool(row["ativo"]) if "ativo" in keys else True
         cn = row["conta_nome"] if "conta_nome" in keys and row["conta_nome"] else None
+        cat_id = row["category_id"] if "category_id" in keys else None
+        catn = row["categoria_nome"] if "categoria_nome" in keys and row["categoria_nome"] else None
         return cls(
             id=row["id"],
             nome=row["nome"],
@@ -31,4 +35,6 @@ class FixedExpense:
             observacao=row["observacao"] if "observacao" in keys else None,
             ativo=ativo,
             conta_nome=cn,
+            category_id=cat_id,
+            categoria_nome=catn,
         )

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.charts import year_expense_evolution
-from app.services import calendar_service, dashboard_service
+from app.services import calendar_service, dashboard_service, investments_service
 from app.services.calendar_service import CalendarEvent
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.chart_canvas import ChartCanvas
@@ -45,7 +45,7 @@ class DashboardView(QWidget):
         )
         self.card_previsto = KpiCard(
             "Previsto do mês",
-            subtitle="Assinaturas + parcelas + fixos",
+            subtitle="Faturas + assinaturas (conta) + parcelas à vista + fixos",
             compact=True,
         )
         self.card_margem_previsto = KpiCard(
@@ -54,7 +54,9 @@ class DashboardView(QWidget):
 
         # Linha 2 — Compromissos recorrentes
         self.card_parcelas_mes = KpiCard(
-            "Parcelas do mês", subtitle="0 ativos · saldo —", compact=True
+            "Parcelas do mês (sem cartão)",
+            subtitle="0 ativos · saldo —",
+            compact=True,
         )
         self.card_fixos_mes = KpiCard(
             "Fixos pendentes", subtitle="0 ativos · restante ano —", compact=True
@@ -63,7 +65,14 @@ class DashboardView(QWidget):
             "Assinaturas", subtitle="0 ativas", compact=True
         )
         self.card_proximo = KpiCard(
-            "Próximo vencimento", subtitle="Nenhum", compact=True
+            "Próximo vencimento",
+            subtitle="Nenhum",
+            compact=True,
+        )
+        self.card_proximo.setToolTip(
+            "Primeiro compromisso nos próximos "
+            f"{calendar_service.UPCOMING_HORIZON_DAYS} dias: "
+            "fatura de cartão, assinatura em conta, fixo pendente, parcela à vista."
         )
 
         line1 = (
@@ -79,6 +88,12 @@ class DashboardView(QWidget):
             self.card_proximo,
         )
 
+        self.card_invest = KpiCard(
+            "Total investido",
+            subtitle="Soma do valor aplicado (ativos)",
+            compact=True,
+        )
+
         kpi_grid = QGridLayout()
         kpi_grid.setContentsMargins(0, 0, 0, 0)
         kpi_grid.setHorizontalSpacing(12)
@@ -91,6 +106,7 @@ class DashboardView(QWidget):
             kpi_grid.addWidget(w, 0, col, align)
         for col, w in enumerate(line2):
             kpi_grid.addWidget(w, 1, col, align)
+        kpi_grid.addWidget(self.card_invest, 2, 0, 1, 4, align)
 
         kpi_wrap = QWidget()
         kpi_wrap.setLayout(kpi_grid)
@@ -208,12 +224,24 @@ class DashboardView(QWidget):
         self.card_renda.set_value(format_currency(data.renda_mensal_total))
         self.card_gasto_mes.set_value(format_currency(data.total_gasto_mes))
         self.card_previsto.set_value(format_currency(data.previsto_mes))
+        self.card_previsto.setToolTip(
+            "Inclui faturas de cartão em aberto (valor registrado ou sugerido), "
+            "assinaturas debitadas em conta, parcelas sem cartão no mês e fixos pendentes."
+        )
         self.card_margem_previsto.set_value(format_currency(data.margem_apos_previsto))
+
+        self.card_invest.set_value(format_currency(data.total_investido))
+        self.card_invest.set_subtitle(
+            f"{len(investments_service.list_all())} posição(ões) ativa(s)"
+        )
 
         self.card_parcelas_mes.set_value(format_currency(data.parcelas_mes_atual))
         self.card_parcelas_mes.set_subtitle(
             f"{data.parcelamentos_ativos_qtd} ativos · saldo "
             f"{format_currency(data.saldo_devedor_total)}"
+        )
+        self.card_parcelas_mes.setToolTip(
+            "Parcelas cuja cobrança não está em cartão (demais parcelas entram na fatura)."
         )
         self.card_fixos_mes.set_value(format_currency(data.fixos_pendentes_mes))
         self.card_fixos_mes.set_subtitle(
@@ -258,6 +286,7 @@ class DashboardView(QWidget):
         "assinatura": "Assinatura",
         "fixo": "Gasto fixo",
         "parcela": "Parcelamento",
+        "fatura": "Fatura cartão",
     }
 
     def _fill_vencimentos(self, rows: list[CalendarEvent]) -> None:

@@ -15,9 +15,10 @@ def list_all() -> List[Installment]:
     with transaction() as conn:
         rows = conn.execute(
             """
-            SELECT i.*, c.nome AS cartao_nome
+            SELECT i.*, c.nome AS cartao_nome, cat.nome AS categoria_nome
               FROM installments i
               LEFT JOIN cards c ON c.id = i.cartao_id
+              LEFT JOIN categories cat ON cat.id = i.category_id
              ORDER BY i.status ASC, i.id DESC
             """
         ).fetchall()
@@ -28,9 +29,10 @@ def get(installment_id: int) -> Optional[Installment]:
     with transaction() as conn:
         row = conn.execute(
             """
-            SELECT i.*, c.nome AS cartao_nome
+            SELECT i.*, c.nome AS cartao_nome, cat.nome AS categoria_nome
               FROM installments i
               LEFT JOIN cards c ON c.id = i.cartao_id
+              LEFT JOIN categories cat ON cat.id = i.category_id
              WHERE i.id = ?
             """,
             (installment_id,),
@@ -53,8 +55,8 @@ def create(installment: Installment) -> int:
             """
             INSERT INTO installments (
                 nome_fatura, cartao, cartao_id, mes_referencia, valor_parcela,
-                total_parcelas, parcelas_pagas, status, observacao
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                total_parcelas, parcelas_pagas, status, observacao, category_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 installment.nome_fatura,
@@ -66,6 +68,7 @@ def create(installment: Installment) -> int:
                 installment.parcelas_pagas,
                 status,
                 installment.observacao,
+                installment.category_id,
             ),
         )
         return int(cur.lastrowid)
@@ -89,7 +92,7 @@ def update(installment: Installment) -> None:
             UPDATE installments
                SET nome_fatura = ?, cartao = ?, cartao_id = ?, mes_referencia = ?,
                    valor_parcela = ?, total_parcelas = ?, parcelas_pagas = ?,
-                   status = ?, observacao = ?
+                   status = ?, observacao = ?, category_id = ?
              WHERE id = ?
             """,
             (
@@ -102,9 +105,24 @@ def update(installment: Installment) -> None:
                 installment.parcelas_pagas,
                 status,
                 installment.observacao,
+                installment.category_id,
                 installment.id,
             ),
         )
+
+
+def list_active_ids_for_card_month(cartao_id: int, ano_mes: str) -> list[int]:
+    with transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT id FROM installments
+             WHERE status = 'ativo'
+               AND cartao_id = ?
+               AND mes_referencia = ?
+            """,
+            (cartao_id, ano_mes),
+        ).fetchall()
+    return [int(r["id"]) for r in rows]
 
 
 def increment_paid(installment_id: int, delta: int = 1) -> None:

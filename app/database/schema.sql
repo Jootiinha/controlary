@@ -4,6 +4,16 @@ CREATE TABLE IF NOT EXISTS accounts (
     observacao  TEXT
 );
 
+CREATE TABLE IF NOT EXISTS categories (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome           TEXT    NOT NULL COLLATE NOCASE UNIQUE,
+    tipo_sugerido  TEXT,
+    cor            TEXT,
+    ativo          INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_categories_ativo ON categories(ativo);
+
 CREATE TABLE IF NOT EXISTS cards (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     nome                  TEXT    NOT NULL,
@@ -23,12 +33,14 @@ CREATE TABLE IF NOT EXISTS payments (
     data            TEXT    NOT NULL,
     conta           TEXT,
     conta_id        INTEGER REFERENCES accounts(id),
+    cartao_id       INTEGER REFERENCES cards(id),
     forma_pagamento TEXT    NOT NULL,
-    observacao      TEXT
+    observacao      TEXT,
+    category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+    CHECK (NOT (conta_id IS NOT NULL AND cartao_id IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_data ON payments(data);
--- idx_payments_conta_id criado em migrations.py após existir a coluna conta_id
 
 CREATE TABLE IF NOT EXISTS installments (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,6 +53,7 @@ CREATE TABLE IF NOT EXISTS installments (
     parcelas_pagas  INTEGER NOT NULL DEFAULT 0,
     status          TEXT    NOT NULL DEFAULT 'ativo',
     observacao      TEXT,
+    category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL,
     CHECK (total_parcelas > 0),
     CHECK (parcelas_pagas >= 0),
     CHECK (parcelas_pagas <= total_parcelas),
@@ -48,7 +61,6 @@ CREATE TABLE IF NOT EXISTS installments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_installments_status ON installments(status);
--- idx_installments_cartao_id criado em migrations.py após existir cartao_id
 CREATE INDEX IF NOT EXISTS idx_installments_mes ON installments(mes_referencia);
 
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -63,13 +75,13 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     card_id         INTEGER REFERENCES cards(id) ON DELETE SET NULL,
     status          TEXT    NOT NULL DEFAULT 'ativa',
     observacao      TEXT,
+    category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL,
     CHECK (dia_cobranca BETWEEN 1 AND 31),
     CHECK (status IN ('ativa', 'pausada', 'cancelada')),
     CHECK (NOT (account_id IS NOT NULL AND card_id IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
--- índices em account_id/card_id criados em migrations.py após as colunas existirem
 
 CREATE TABLE IF NOT EXISTS fixed_expenses (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,6 +92,7 @@ CREATE TABLE IF NOT EXISTS fixed_expenses (
     conta_id        INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
     observacao      TEXT,
     ativo           INTEGER NOT NULL DEFAULT 1,
+    category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL,
     CHECK (dia_referencia BETWEEN 1 AND 31),
     CHECK (valor_mensal >= 0)
 );
@@ -106,3 +119,44 @@ CREATE TABLE IF NOT EXISTS income_sources (
 );
 
 CREATE INDEX IF NOT EXISTS idx_income_sources_ativo ON income_sources(ativo);
+
+CREATE TABLE IF NOT EXISTS card_invoices (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    cartao_id           INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    ano_mes             TEXT    NOT NULL,
+    valor_total         REAL    NOT NULL DEFAULT 0,
+    status              TEXT    NOT NULL DEFAULT 'aberta',
+    pago_em             TEXT,
+    conta_pagamento_id  INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+    observacao          TEXT,
+    UNIQUE (cartao_id, ano_mes),
+    CHECK (status IN ('aberta', 'fechada', 'paga'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_card_invoices_mes ON card_invoices(ano_mes);
+
+CREATE TABLE IF NOT EXISTS investments (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    banco_id                 INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    nome                     TEXT    NOT NULL,
+    tipo                     TEXT    NOT NULL,
+    valor_aplicado           REAL    NOT NULL DEFAULT 0,
+    rendimento_percentual_aa REAL,
+    data_aplicacao           TEXT    NOT NULL,
+    data_vencimento          TEXT,
+    category_id              INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+    observacao               TEXT,
+    ativo                    INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_investments_banco ON investments(banco_id);
+CREATE INDEX IF NOT EXISTS idx_investments_ativo ON investments(ativo);
+
+CREATE TABLE IF NOT EXISTS investment_snapshots (
+    investment_id INTEGER NOT NULL REFERENCES investments(id) ON DELETE CASCADE,
+    data          TEXT    NOT NULL,
+    valor_atual   REAL    NOT NULL,
+    PRIMARY KEY (investment_id, data)
+);
+
+CREATE INDEX IF NOT EXISTS idx_investment_snapshots_data ON investment_snapshots(data);

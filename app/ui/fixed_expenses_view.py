@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QDialog,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -27,9 +28,12 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.fixed_expense import FixedExpense
-from app.services import accounts_service, fixed_expenses_service
+from app.services import accounts_service, fixed_expenses_service, payments_service
+from app.ui.categories_view import CategoryDialog
+from app.ui.widgets.category_picker import CategoryPicker
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
+from app.ui.widgets.payment_confirmation_dialog import FixedExpensePaidDialog
 from app.utils.formatting import format_currency, format_month_br
 
 
@@ -63,6 +67,9 @@ class FixedExpenseDialog(FormDialog):
         self.cmb_forma = QComboBox()
         self.cmb_forma.addItems(FORMAS)
 
+        self._picker_cat = CategoryPicker(self, allow_empty=False)
+        self._picker_cat.connect_new_button(self._nova_categoria)
+
         self.chk_ativo = QCheckBox("Ativo (entra nas projeções)")
         self.chk_ativo.setChecked(True)
 
@@ -73,6 +80,7 @@ class FixedExpenseDialog(FormDialog):
         self.form.addRow("Valor mensal *", self.ed_valor)
         self.form.addRow("Dia de vencimento *", self.ed_dia)
         self.form.addRow("Conta", self.cmb_conta)
+        self.form.addRow("Categoria *", self._picker_cat)
         self.form.addRow("Forma de pagamento *", self.cmb_forma)
         self.form.addRow("", self.chk_ativo)
         self.form.addRow("Observação", self.ed_obs)
@@ -91,6 +99,16 @@ class FixedExpenseDialog(FormDialog):
                 self.cmb_forma.setCurrentIndex(idx)
             self.chk_ativo.setChecked(fe.ativo)
             self.ed_obs.setPlainText(fe.observacao or "")
+            if fe.category_id is not None:
+                self._picker_cat.set_category_id(fe.category_id)
+
+    def _nova_categoria(self) -> None:
+        dlg = CategoryDialog(self)
+        if dlg.exec():
+            from app.services import categories_service
+
+            categories_service.create(dlg.payload())
+            self._picker_cat.reload_from_db()
 
     def _fill_contas(self) -> None:
         self.cmb_conta.clear()
@@ -103,6 +121,8 @@ class FixedExpenseDialog(FormDialog):
             return False, "Informe o nome"
         if self.ed_valor.value() <= 0:
             return False, "Valor deve ser maior que zero"
+        if self._picker_cat.current_category_id() is None:
+            return False, "Selecione uma categoria"
         return True, None
 
     def payload(self) -> FixedExpense:
@@ -116,6 +136,7 @@ class FixedExpenseDialog(FormDialog):
             conta_id=int(cid) if cid is not None else None,
             observacao=self.ed_obs.toPlainText().strip() or None,
             ativo=self.chk_ativo.isChecked(),
+            category_id=self._picker_cat.current_category_id(),
         )
 
 
@@ -126,7 +147,7 @@ class _FixedCrud(CrudPage):
         super().__init__(
             "Itens de gasto fixo",
             "Aluguel, contas de consumo, telefone etc. O valor entra no previsto até marcar como pago no mês.",
-            ["Nome", "Valor/mês", "Dia", "Conta", "Forma", "Ativo"],
+            ["Nome", "Valor/mês", "Dia", "Conta", "Categoria", "Forma", "Ativo"],
         )
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
@@ -136,11 +157,13 @@ class _FixedCrud(CrudPage):
     def reload(self) -> None:
         rows = []
         for fe in fixed_expenses_service.list_all():
+            cat = fe.categoria_nome or "—"
             rows.append((fe.id or 0, [
                 fe.nome,
                 format_currency(fe.valor_mensal),
                 str(fe.dia_referencia),
                 fe.conta_nome or "—",
+                cat,
                 fe.forma_pagamento,
                 "Sim" if fe.ativo else "Não",
             ]))
@@ -221,7 +244,7 @@ class _MonthlyControl(QWidget):
         self.tbl.setAlternatingRowColors(True)
         self.tbl.setShowGrid(True)
         self.tbl.verticalHeader().setVisible(False)
-        self.tbl.verticalHeader().setDefaultSectionSize(36)
+        self.tbl.verticalHeader().setDefaultSectionSize(44)
         self.tbl.setWordWrap(False)
 
         th = self.tbl.horizontalHeader()
@@ -326,7 +349,6 @@ class _MonthlyControl(QWidget):
             cb = QComboBox()
             cb.addItems(["Pendente", "Pago"])
             cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            cb.setFixedHeight(28)
             cb.setMinimumWidth(138)
             pago = fixed_expenses_service.is_paid(fe.id, ym)
             cb.blockSignals(True)
@@ -336,9 +358,28 @@ class _MonthlyControl(QWidget):
 
             def make_handler(f_id: int, combo: QComboBox, competencia: str):
                 def on_change(_idx: int) -> None:
-                    fixed_expenses_service.set_month_status(
-                        f_id, competencia, pago=(combo.currentIndex() == 1)
-                    )
+                    want_pago = combo.currentIndex() == 1
+                    was_pago = fixed_expenses_service.is_paid(f_id, competencia)
+                    if want_pago and not was_pago:
+                        fe = fixed_expenses_service.get(f_id)
+                        if fe is None:
+                            return
+                        dlg = FixedExpensePaidDialog(self, fe, competencia)
+                        if dlg.exec() != QDialog.Accepted:
+                            combo.blockSignals(True)
+                            combo.setCurrentIndex(0)
+                            combo.blockSignals(False)
+                            return
+                        mp = dlg.mirror_payment()
+                        if mp is not None:
+                            payments_service.create(mp)
+                        fixed_expenses_service.set_month_status(
+                            f_id, competencia, pago=True
+                        )
+                    else:
+                        fixed_expenses_service.set_month_status(
+                            f_id, competencia, pago=want_pago
+                        )
                     self.data_changed.emit()
                     self._reload_projection()
 

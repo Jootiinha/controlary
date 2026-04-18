@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 
 from app.models.installment import Installment
 from app.services import cards_service, installments_service
+from app.ui.categories_view import CategoryDialog
+from app.ui.widgets.category_picker import CategoryPicker
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
 from app.utils.formatting import format_currency, format_month_br
@@ -35,6 +37,9 @@ class InstallmentDialog(FormDialog):
         self.ed_cartao = QComboBox()
         self.ed_cartao.setEditable(False)
         self._fill_cartoes()
+
+        self._picker_cat = CategoryPicker(self, allow_empty=False)
+        self._picker_cat.connect_new_button(self._nova_categoria)
 
         self.ed_mes = QDateEdit()
         self.ed_mes.setDisplayFormat("MM/yyyy")
@@ -62,6 +67,7 @@ class InstallmentDialog(FormDialog):
 
         self.form.addRow("Nome na fatura *", self.ed_nome)
         self.form.addRow("Cartão *", self.ed_cartao)
+        self.form.addRow("Categoria *", self._picker_cat)
         self.form.addRow("Mês de referência *", self.ed_mes)
         self.form.addRow("Valor da parcela *", self.ed_valor_parcela)
         self.form.addRow("Total de parcelas *", self.ed_total)
@@ -89,8 +95,18 @@ class InstallmentDialog(FormDialog):
             self.ed_total.setValue(installment.total_parcelas)
             self.ed_pagas.setValue(installment.parcelas_pagas)
             self.ed_obs.setPlainText(installment.observacao or "")
+            if installment.category_id is not None:
+                self._picker_cat.set_category_id(installment.category_id)
 
         self._update_calc()
+
+    def _nova_categoria(self) -> None:
+        dlg = CategoryDialog(self)
+        if dlg.exec():
+            from app.services import categories_service
+
+            categories_service.create(dlg.payload())
+            self._picker_cat.reload_from_db()
 
     def _fill_cartoes(self) -> None:
         self.ed_cartao.clear()
@@ -125,6 +141,8 @@ class InstallmentDialog(FormDialog):
             return False, "Valor da parcela deve ser maior que zero"
         if self.ed_pagas.value() > self.ed_total.value():
             return False, "Parcelas pagas não pode exceder o total"
+        if self._picker_cat.current_category_id() is None:
+            return False, "Selecione uma categoria"
         return True, None
 
     def payload(self) -> Installment:
@@ -140,6 +158,7 @@ class InstallmentDialog(FormDialog):
             total_parcelas=int(self.ed_total.value()),
             parcelas_pagas=int(self.ed_pagas.value()),
             observacao=self.ed_obs.toPlainText().strip() or None,
+            category_id=self._picker_cat.current_category_id(),
         )
 
 
@@ -151,7 +170,7 @@ class InstallmentsView(CrudPage):
             "Parcelamentos",
             "Controle compras parceladas e acompanhe o saldo devedor.",
             [
-                "Nome", "Cartão", "Mês Ref.", "Parcela", "Total",
+                "Nome", "Cartão", "Categoria", "Mês Ref.", "Parcela", "Total",
                 "Pagas", "Restantes", "Saldo devedor", "Status",
             ],
         )
@@ -165,9 +184,11 @@ class InstallmentsView(CrudPage):
         rows = []
         for i in installments_service.list_all():
             cnome = i.cartao_nome or "—"
+            cat = i.categoria_nome or "—"
             rows.append((i.id or 0, [
                 i.nome_fatura,
                 cnome,
+                cat,
                 format_month_br(i.mes_referencia),
                 format_currency(i.valor_parcela),
                 format_currency(i.valor_total),

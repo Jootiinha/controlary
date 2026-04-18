@@ -28,6 +28,7 @@ _TIPO_LABEL = {
     "assinatura": "Assinatura",
     "fixo": "Gasto fixo",
     "parcela": "Parcelamento",
+    "fatura": "Fatura cartão",
 }
 
 
@@ -38,8 +39,8 @@ class CalendarView(QWidget):
         self.lbl_title = QLabel("Calendário")
         self.lbl_title.setObjectName("PageTitle")
         self.lbl_subtitle = QLabel(
-            "Pagamentos lançados, rendas, assinaturas, gastos fixos e parcelas. "
-            "Parcelamentos usam o dia de pagamento da fatura definido no cartão."
+            "Lançamentos em conta, rendas, assinaturas em conta, fixos, parcelas à vista e "
+            "um evento por fatura de cartão (parcelas/assinaturas/pagamentos no cartão agregados)."
         )
         self.lbl_subtitle.setObjectName("PageSubtitle")
         self.lbl_subtitle.setWordWrap(True)

@@ -164,10 +164,22 @@ def _ensure_indexes_on_fk_columns(conn) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_payments_conta_id ON payments(conta_id)"
         )
+    if "cartao_id" in cols:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payments_cartao_id ON payments(cartao_id)"
+        )
+    if "category_id" in cols:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payments_category ON payments(category_id)"
+        )
     cols = _table_columns(conn, "installments")
     if "cartao_id" in cols:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_installments_cartao_id ON installments(cartao_id)"
+        )
+    if "category_id" in cols:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_installments_category ON installments(category_id)"
         )
     cols = _table_columns(conn, "subscriptions")
     if "account_id" in cols:
@@ -178,6 +190,188 @@ def _ensure_indexes_on_fk_columns(conn) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_subscriptions_card ON subscriptions(card_id)"
         )
+    if "category_id" in cols:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subscriptions_category ON subscriptions(category_id)"
+        )
+    cols = _table_columns(conn, "fixed_expenses")
+    if "category_id" in cols:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fixed_expenses_category ON fixed_expenses(category_id)"
+        )
+
+
+def _migrate_categories_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS categories (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome           TEXT    NOT NULL COLLATE NOCASE UNIQUE,
+            tipo_sugerido  TEXT,
+            cor            TEXT,
+            ativo          INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_categories_ativo ON categories(ativo)"
+    )
+
+
+def _seed_default_categories(conn) -> None:
+    row = conn.execute("SELECT COUNT(*) AS n FROM categories").fetchone()
+    if row and int(row["n"] or 0) > 0:
+        return
+    defaults = [
+        ("Streaming", "assinatura"),
+        ("Software", "assinatura"),
+        ("Música", "assinatura"),
+        ("Academia", "assinatura"),
+        ("Jogos", "assinatura"),
+        ("Educação", "assinatura"),
+        ("Notícias", "assinatura"),
+        ("Mercado", "pagamento"),
+        ("Transporte", "pagamento"),
+        ("Saúde", "pagamento"),
+        ("Moradia", "fixo"),
+        ("Serviços", "fixo"),
+        ("Outros", None),
+    ]
+    for nome, tipo in defaults:
+        conn.execute(
+            "INSERT OR IGNORE INTO categories (nome, tipo_sugerido, ativo) VALUES (?, ?, 1)",
+            (nome, tipo),
+        )
+
+
+def _migrate_category_id_columns(conn) -> None:
+    for table in ("subscriptions", "fixed_expenses", "installments"):
+        cols = _table_columns(conn, table)
+        if "category_id" in cols:
+            continue
+        conn.execute(
+            f"ALTER TABLE {table} ADD COLUMN category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL"
+        )
+
+
+def _migrate_subscriptions_category_legacy(conn) -> None:
+    cols = _table_columns(conn, "subscriptions")
+    if "category_id" not in cols:
+        return
+    rows = conn.execute(
+        """
+        SELECT id, categoria FROM subscriptions
+         WHERE categoria IS NOT NULL AND TRIM(categoria) != ''
+           AND category_id IS NULL
+        """
+    ).fetchall()
+    for r in rows:
+        nome = (r["categoria"] or "").strip()
+        if not nome:
+            continue
+        conn.execute(
+            "INSERT OR IGNORE INTO categories (nome, tipo_sugerido, ativo) VALUES (?, 'assinatura', 1)",
+            (nome,),
+        )
+        crow = conn.execute(
+            "SELECT id FROM categories WHERE nome = ? COLLATE NOCASE LIMIT 1",
+            (nome,),
+        ).fetchone()
+        if crow:
+            conn.execute(
+                "UPDATE subscriptions SET category_id = ? WHERE id = ?",
+                (crow["id"], r["id"]),
+            )
+
+
+def _migrate_default_category_where_null(conn) -> None:
+    row = conn.execute(
+        "SELECT id FROM categories WHERE nome = 'Outros' COLLATE NOCASE LIMIT 1"
+    ).fetchone()
+    if not row:
+        return
+    oid = int(row["id"])
+    for table in ("payments", "subscriptions", "fixed_expenses", "installments"):
+        cols = _table_columns(conn, table)
+        if "category_id" not in cols:
+            continue
+        conn.execute(
+            f"UPDATE {table} SET category_id = ? WHERE category_id IS NULL",
+            (oid,),
+        )
+
+
+def _migrate_payments_cartao_and_category(conn) -> None:
+    cols = _table_columns(conn, "payments")
+    if "cartao_id" not in cols:
+        conn.execute(
+            "ALTER TABLE payments ADD COLUMN cartao_id INTEGER REFERENCES cards(id)"
+        )
+    if "category_id" not in cols:
+        conn.execute(
+            "ALTER TABLE payments ADD COLUMN category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL"
+        )
+
+
+def _migrate_card_invoices_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS card_invoices (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            cartao_id           INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+            ano_mes             TEXT    NOT NULL,
+            valor_total         REAL    NOT NULL DEFAULT 0,
+            status              TEXT    NOT NULL DEFAULT 'aberta',
+            pago_em             TEXT,
+            conta_pagamento_id  INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            observacao          TEXT,
+            UNIQUE (cartao_id, ano_mes),
+            CHECK (status IN ('aberta', 'fechada', 'paga'))
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_card_invoices_mes ON card_invoices(ano_mes)"
+    )
+
+
+def _migrate_investments_tables(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS investments (
+            id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+            banco_id                 INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            nome                     TEXT    NOT NULL,
+            tipo                     TEXT    NOT NULL,
+            valor_aplicado           REAL    NOT NULL DEFAULT 0,
+            rendimento_percentual_aa REAL,
+            data_aplicacao           TEXT    NOT NULL,
+            data_vencimento          TEXT,
+            category_id              INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+            observacao               TEXT,
+            ativo                    INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS investment_snapshots (
+            investment_id INTEGER NOT NULL REFERENCES investments(id) ON DELETE CASCADE,
+            data          TEXT    NOT NULL,
+            valor_atual   REAL    NOT NULL,
+            PRIMARY KEY (investment_id, data)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_investments_banco ON investments(banco_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_investments_ativo ON investments(ativo)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_investment_snapshots_data ON investment_snapshots(data)"
+    )
 
 
 def run_migrations() -> None:
@@ -191,4 +385,12 @@ def run_migrations() -> None:
         _migrate_subscriptions_meio(conn)
         _migrate_cards_dia_pagamento_fatura(conn)
         _migrate_income_sources_dia_recebimento(conn)
+        _migrate_categories_table(conn)
+        _seed_default_categories(conn)
+        _migrate_category_id_columns(conn)
+        _migrate_subscriptions_category_legacy(conn)
+        _migrate_payments_cartao_and_category(conn)
+        _migrate_default_category_where_null(conn)
+        _migrate_card_invoices_table(conn)
+        _migrate_investments_tables(conn)
         _ensure_indexes_on_fk_columns(conn)
