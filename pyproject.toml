@@ -1,0 +1,25 @@
+[project]
+name = "controle-financeiro"
+version = "0.1.0"
+description = "App desktop de controle financeiro pessoal (PySide6 + SQLite)"
+authors = [{ name = "João Monteiro" }]
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "PySide6 (>=6.6,<7.0)",
+    "matplotlib (>=3.8,<4.0)",
+    "Pillow (>=10.0,<11.0)",
+]
+
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.group.build]
+optional = true
+
+[tool.poetry.group.build.dependencies]
+pyinstaller = "^6.3"
+
+[build-system]
+requires = ["poetry-core>=2.0"]
+build-backend = "poetry.core.masonry.api"
