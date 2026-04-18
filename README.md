@@ -5,10 +5,17 @@ Roda 100% offline, com persistência local e interface nativa moderna.
 
 ## Funcionalidades
 
-- **Dashboard** com KPIs do mês (gasto, previsto, assinaturas, parcelamentos, saldo devedor, quebra por conta e forma de pagamento)
+- **Dashboard** com 8 KPIs padronizados (2×4) do mês corrente:
+  - Fluxo: renda mensal, gasto no mês, previsto do mês, saldo projetado
+  - Compromissos: parcelas do mês, fixos pendentes, assinaturas, próximo vencimento
+  - Tabela de **próximos vencimentos** (14 dias), gráfico anual e quebra por conta/forma de pagamento
+- **Renda**: múltiplas fontes de renda mensais com dia de recebimento e status ativa/inativa
+- **Contas e cartões**: cadastro base, com dia de pagamento da fatura por cartão
 - **Pagamentos**: CRUD com valor, descrição, data, conta, forma e observação
-- **Parcelamentos** (cartão de crédito): cálculo automático de valor total, parcelas restantes, saldo devedor e status (ativo/quitado)
+- **Parcelamentos** (cartão de crédito): valor total, parcelas restantes, saldo devedor e status (ativo/quitado); vencimento da parcela segue o dia de pagamento da fatura do cartão
 - **Assinaturas** recorrentes: status ativa/pausada/cancelada, dia de cobrança, valor mensal
+- **Gastos fixos**: cadastro por competência, dia de vencimento e marcação de pago/pendente por mês
+- **Calendário**: visão mensal com marcação dos dias que têm eventos (pagamentos, rendas, assinaturas, fixos e parcelas)
 - **Histórico** com tabela de transações + gráficos embedados (matplotlib):
   - Gastos por mês (últimos 12 meses)
   - Evolução da fatura por mês de referência
@@ -17,31 +24,37 @@ Roda 100% offline, com persistência local e interface nativa moderna.
 
 ## Stack
 
-- Python ≥ 3.11
+- Python ≥ 3.11 (`<3.14`)
 - [PySide6](https://doc.qt.io/qtforpython-6/) (Qt 6)
 - SQLite (via `sqlite3` da stdlib)
 - [matplotlib](https://matplotlib.org/) (backend `QtAgg`)
+- [Pillow](https://python-pillow.org/) (geração de ícones)
 - [Poetry](https://python-poetry.org/) para dependências
 - [PyInstaller](https://pyinstaller.org/) para empacotamento
 
 ## Estrutura
 
 ```
-controle-financeiro/
+controlary/
 ├── app/
 │   ├── ui/              # QMainWindow, views e widgets reutilizáveis
 │   │   ├── widgets/     # card, chart_canvas, form_dialog, crud_page
 │   │   ├── main_window.py
 │   │   ├── dashboard_view.py
-│   │   ├── accounts_cards_view.py   # cadastro de contas e cartões
+│   │   ├── income_sources_view.py   # fontes de renda
+│   │   ├── accounts_cards_view.py   # contas e cartões
 │   │   ├── payments_view.py
 │   │   ├── installments_view.py
 │   │   ├── subscriptions_view.py
+│   │   ├── fixed_expenses_view.py
+│   │   ├── calendar_view.py
 │   │   ├── history_view.py
 │   │   └── style.qss
-│   ├── models/          # Account, Card, Payment, Installment, Subscription
+│   ├── models/          # Account, Card, IncomeSource, Payment,
+│   │                    # Installment, Subscription, FixedExpense
 │   ├── database/        # connection.py, schema.sql, migrations.py
 │   ├── services/        # regras de negócio e queries agregadas
+│   │                    # (dashboard, calendar, pagamentos, etc.)
 │   ├── charts/          # funções que desenham em um Axes matplotlib
 │   └── utils/           # formatação, resolução de paths
 ├── assets/              # icon.png, icon.ico, icon.icns
@@ -52,12 +65,13 @@ controle-financeiro/
 │   └── make_icon.py               # gera ícones placeholder
 ├── main.py
 ├── pyproject.toml
+├── AGENTS.md            # instruções para agentes de IA
 └── README.md
 ```
 
 ## Requisitos
 
-- **Python 3.11 ou superior**
+- **Python 3.11 ou superior** (até 3.13)
 - **Poetry 1.8+** (recomendo 2.x) — instale em <https://python-poetry.org/docs/#installation>
 
 ## Comandos Make
@@ -204,12 +218,16 @@ poetry run pyinstaller --noconfirm --windowed --name "ControleFinanceiro" ^
 Schema em [app/database/schema.sql](app/database/schema.sql). Tabelas principais:
 
 - `accounts(id, nome, observacao)` — contas bancárias cadastradas
-- `cards(id, nome, account_id, observacao)` — cartões (opcionalmente vinculados a uma conta)
-- `payments(..., conta_id → accounts, conta texto legado espelhado)` — pagamentos usam **conta** da lista
-- `installments(..., cartao_id → cards, cartao texto legado espelhado)` — parcelamentos usam **cartão** da lista
-- `subscriptions(..., account_id, card_id, conta_cartao legado)` — vínculo opcional com conta **ou** cartão (nunca os dois)
+- `cards(id, nome, account_id, dia_pagamento_fatura, observacao)` — cartões com dia do vencimento da fatura (usado no cálculo da data das parcelas)
+- `income_sources(id, nome, valor_mensal, ativo, dia_recebimento, observacao)` — fontes de renda mensal
+- `payments(..., conta_id → accounts)` — pagamentos lançados
+- `installments(..., cartao_id → cards)` — parcelamentos no crédito
+- `subscriptions(..., account_id, card_id)` — vínculo opcional com conta **ou** cartão (nunca os dois)
+- `fixed_expenses(id, nome, valor, dia_referencia, ativo, observacao)` + `fixed_expense_payments(fixed_expense_id, ano_mes, pago_em)` — despesas fixas e marcação mensal de pagamento
 
-Na primeira execução, cadastre contas e cartões em **Contas e cartões** antes de lançar pagamentos ou parcelamentos. A migração copia textos antigos para novas tabelas quando possível.
+Migrações incrementais em [app/database/migrations.py](app/database/migrations.py) garantem colunas novas (`dia_pagamento_fatura`, `dia_recebimento`, etc.) em bancos antigos.
+
+Na primeira execução, cadastre contas e cartões em **Contas e cartões** antes de lançar pagamentos ou parcelamentos.
 
 Para fazer backup do seu banco:
 
