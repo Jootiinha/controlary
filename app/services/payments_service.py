@@ -1,6 +1,7 @@
 """Operações de CRUD para pagamentos."""
 from __future__ import annotations
 
+from datetime import date
 from typing import List, Optional
 
 from app.database.connection import transaction
@@ -16,6 +17,24 @@ def list_all() -> List[Payment]:
               LEFT JOIN accounts a ON a.id = p.conta_id
              ORDER BY date(p.data) DESC, p.id DESC
             """
+        ).fetchall()
+    return [Payment.from_row(r) for r in rows]
+
+
+def list_between(data_ini: date, data_fim: date) -> List[Payment]:
+    """Pagamentos com `data` no intervalo inclusivo (por dia civil)."""
+    s_ini = data_ini.isoformat()
+    s_fim = data_fim.isoformat()
+    with transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT p.*, a.nome AS conta_nome
+              FROM payments p
+              LEFT JOIN accounts a ON a.id = p.conta_id
+             WHERE date(p.data) BETWEEN date(?) AND date(?)
+             ORDER BY date(p.data), p.id
+            """,
+            (s_ini, s_fim),
         ).fetchall()
     return [Payment.from_row(r) for r in rows]
 

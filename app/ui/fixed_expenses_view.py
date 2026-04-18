@@ -71,7 +71,7 @@ class FixedExpenseDialog(FormDialog):
 
         self.form.addRow("Nome *", self.ed_nome)
         self.form.addRow("Valor mensal *", self.ed_valor)
-        self.form.addRow("Dia de referência *", self.ed_dia)
+        self.form.addRow("Dia de vencimento *", self.ed_dia)
         self.form.addRow("Conta", self.cmb_conta)
         self.form.addRow("Forma de pagamento *", self.cmb_forma)
         self.form.addRow("", self.chk_ativo)

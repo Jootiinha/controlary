@@ -5,11 +5,13 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 
 CREATE TABLE IF NOT EXISTS cards (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome        TEXT    NOT NULL,
-    account_id  INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
-    observacao  TEXT,
-    UNIQUE (nome COLLATE NOCASE)
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome                  TEXT    NOT NULL,
+    account_id            INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+    observacao            TEXT,
+    dia_pagamento_fatura  INTEGER NOT NULL DEFAULT 10,
+    UNIQUE (nome COLLATE NOCASE),
+    CHECK (dia_pagamento_fatura BETWEEN 1 AND 31)
 );
 
 CREATE INDEX IF NOT EXISTS idx_cards_account ON cards(account_id);
@@ -91,3 +93,16 @@ CREATE TABLE IF NOT EXISTS fixed_expense_months (
 );
 
 CREATE INDEX IF NOT EXISTS idx_fixed_expense_months_mes ON fixed_expense_months(ano_mes);
+
+CREATE TABLE IF NOT EXISTS income_sources (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome            TEXT    NOT NULL COLLATE NOCASE UNIQUE,
+    valor_mensal    REAL    NOT NULL,
+    ativo           INTEGER NOT NULL DEFAULT 1,
+    dia_recebimento INTEGER NOT NULL DEFAULT 5,
+    observacao      TEXT,
+    CHECK (valor_mensal >= 0),
+    CHECK (dia_recebimento BETWEEN 1 AND 31)
+);
+
+CREATE INDEX IF NOT EXISTS idx_income_sources_ativo ON income_sources(ativo);

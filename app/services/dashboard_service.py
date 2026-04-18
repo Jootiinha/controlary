@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import List
 
 from app.database.connection import transaction
-from app.services import fixed_expenses_service
+from app.services import calendar_service, fixed_expenses_service, income_sources_service
+from app.services.calendar_service import CalendarEvent
 from app.utils.formatting import current_month
 
 
@@ -22,8 +23,12 @@ class DashboardData:
     fixos_restante_ano: float = 0.0
     fixos_ativos_qtd: int = 0
     previsto_mes: float = 0.0
+    renda_mensal_total: float = 0.0
+    margem_apos_previsto: float = 0.0
+    margem_apos_gasto: float = 0.0
     gastos_por_conta: List[tuple[str, float]] = field(default_factory=list)
     gastos_por_forma: List[tuple[str, float]] = field(default_factory=list)
+    proximos_vencimentos: List[CalendarEvent] = field(default_factory=list)
 
 
 def load(mes: str | None = None) -> DashboardData:
@@ -80,6 +85,10 @@ def load(mes: str | None = None) -> DashboardData:
             + data.fixos_pendentes_mes
         )
 
+        data.renda_mensal_total = income_sources_service.sum_active_monthly()
+        data.margem_apos_previsto = data.renda_mensal_total - data.previsto_mes
+        data.margem_apos_gasto = data.renda_mensal_total - data.total_gasto_mes
+
         rows = conn.execute(
             """
             SELECT COALESCE(a.nome, p.conta, '(sem conta)') AS nome_conta,
@@ -105,5 +114,9 @@ def load(mes: str | None = None) -> DashboardData:
             (mes,),
         ).fetchall()
         data.gastos_por_forma = [(r["forma_pagamento"], float(r["total"])) for r in rows]
+
+    data.proximos_vencimentos = calendar_service.upcoming_payables(
+        calendar_service.UPCOMING_HORIZON_DAYS
+    )
 
     return data

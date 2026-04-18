@@ -2,7 +2,63 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PySide6.QtGui import QFontMetrics
+from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout
+
+
+# Tamanho fixo dos KPI compactos no dashboard (todos iguais, sem despadronizar).
+_KPI_COMPACT_W = 168
+_KPI_COMPACT_H = 112
+_KPI_SUBTITLE_MAX_LINES = 2
+
+
+class _ElidedLabel(QLabel):
+    """Label com word-wrap até N linhas e elide com '…' na última."""
+
+    def __init__(self, text: str = "", max_lines: int = 2) -> None:
+        super().__init__(text)
+        self._full_text = text
+        self._max_lines = max_lines
+        self.setWordWrap(True)
+
+    def setText(self, text: str) -> None:  # noqa: D401 - override
+        self._full_text = text or ""
+        super().setText(self._full_text)
+        self._apply_elide()
+
+    def resizeEvent(self, event) -> None:  # noqa: D401 - override
+        super().resizeEvent(event)
+        self._apply_elide()
+
+    def _apply_elide(self) -> None:
+        if not self._full_text:
+            return
+        fm = QFontMetrics(self.font())
+        width = max(1, self.width())
+        # Quebra greedy por palavras; corta ao atingir max_lines e elide na última.
+        words = self._full_text.split()
+        lines: list[str] = []
+        current = ""
+        for w in words:
+            candidate = f"{current} {w}".strip()
+            if fm.horizontalAdvance(candidate) <= width:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+            if len(lines) == self._max_lines:
+                break
+            current = w
+        if current and len(lines) < self._max_lines:
+            lines.append(current)
+        if len(lines) == self._max_lines:
+            remaining = self._full_text
+            consumed = " ".join(lines[:-1])
+            if consumed:
+                remaining = self._full_text[len(consumed):].lstrip()
+            last = fm.elidedText(remaining, Qt.TextElideMode.ElideRight, width)
+            lines[-1] = last
+        super().setText("\n".join(lines) if lines else self._full_text)
 
 
 class KpiCard(QFrame):
@@ -20,23 +76,45 @@ class KpiCard(QFrame):
 
         self._title = QLabel(title)
         self._title.setObjectName("KpiTitle")
+        self._title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._title.setWordWrap(True)
 
         self._value = QLabel(value)
         self._value.setObjectName("KpiValue")
-        self._value.setWordWrap(True)
+        self._value.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._value.setWordWrap(False)
 
-        self._subtitle = QLabel(subtitle)
+        if compact:
+            self._subtitle: QLabel = _ElidedLabel(subtitle, max_lines=_KPI_SUBTITLE_MAX_LINES)
+        else:
+            self._subtitle = QLabel(subtitle)
+            self._subtitle.setWordWrap(True)
         self._subtitle.setObjectName("KpiSubtitle")
-        self._subtitle.setWordWrap(True)
+        self._subtitle.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
 
         layout = QVBoxLayout(self)
-        m = 10 if compact else 16
-        layout.setContentsMargins(m, m, m, m)
-        layout.setSpacing(2)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2 if compact else 8)
         layout.addWidget(self._title)
         layout.addWidget(self._value)
         layout.addWidget(self._subtitle)
-        layout.addStretch()
+
+        if compact:
+            self.setFixedSize(_KPI_COMPACT_W, _KPI_COMPACT_H)
+            self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            self._title.setFixedHeight(16)
+            self._value.setFixedHeight(24)
+            self._subtitle.setFixedHeight(32)
+            layout.setStretch(0, 0)
+            layout.setStretch(1, 0)
+            layout.setStretch(2, 1)
+        else:
+            self._value.setMinimumHeight(36)
+            self.setSizePolicy(
+                QSizePolicy.Policy.Preferred,
+                QSizePolicy.Policy.Preferred,
+            )
+            layout.addStretch(1)
 
     def set_value(self, value: str) -> None:
         self._value.setText(value)

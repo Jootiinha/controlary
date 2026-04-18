@@ -129,6 +129,34 @@ def _migrate_subscriptions_meio(conn) -> None:
             )
 
 
+DEFAULT_DIA_PAGAMENTO_FATURA = 10
+DEFAULT_DIA_RECEBIMENTO_RENDA = 5
+
+
+def _migrate_cards_dia_pagamento_fatura(conn) -> None:
+    cols = _table_columns(conn, "cards")
+    if "dia_pagamento_fatura" in cols:
+        return
+    conn.execute(
+        f"""
+        ALTER TABLE cards ADD COLUMN dia_pagamento_fatura INTEGER NOT NULL
+            DEFAULT {DEFAULT_DIA_PAGAMENTO_FATURA}
+        """
+    )
+
+
+def _migrate_income_sources_dia_recebimento(conn) -> None:
+    cols = _table_columns(conn, "income_sources")
+    if "dia_recebimento" in cols:
+        return
+    conn.execute(
+        f"""
+        ALTER TABLE income_sources ADD COLUMN dia_recebimento INTEGER NOT NULL
+            DEFAULT {DEFAULT_DIA_RECEBIMENTO_RENDA}
+        """
+    )
+
+
 def _ensure_indexes_on_fk_columns(conn) -> None:
     """Cria índices em colunas adicionadas por migração (não podem ir no schema.sql inicial)."""
     cols = _table_columns(conn, "payments")
@@ -161,4 +189,6 @@ def run_migrations() -> None:
         _migrate_payments_conta_id(conn)
         _migrate_installments_cartao_id(conn)
         _migrate_subscriptions_meio(conn)
+        _migrate_cards_dia_pagamento_fatura(conn)
+        _migrate_income_sources_dia_recebimento(conn)
         _ensure_indexes_on_fk_columns(conn)

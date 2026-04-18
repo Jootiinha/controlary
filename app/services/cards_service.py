@@ -38,10 +38,15 @@ def create(card: Card) -> int:
     with transaction() as conn:
         cur = conn.execute(
             """
-            INSERT INTO cards (nome, account_id, observacao)
-            VALUES (?, ?, ?)
+            INSERT INTO cards (nome, account_id, observacao, dia_pagamento_fatura)
+            VALUES (?, ?, ?, ?)
             """,
-            (card.nome.strip(), card.account_id, card.observacao),
+            (
+                card.nome.strip(),
+                card.account_id,
+                card.observacao,
+                card.dia_pagamento_fatura,
+            ),
         )
         return int(cur.lastrowid)
 
@@ -52,10 +57,17 @@ def update(card: Card) -> None:
     with transaction() as conn:
         conn.execute(
             """
-            UPDATE cards SET nome = ?, account_id = ?, observacao = ?
+            UPDATE cards SET nome = ?, account_id = ?, observacao = ?,
+                   dia_pagamento_fatura = ?
              WHERE id = ?
             """,
-            (card.nome.strip(), card.account_id, card.observacao, card.id),
+            (
+                card.nome.strip(),
+                card.account_id,
+                card.observacao,
+                card.dia_pagamento_fatura,
+                card.id,
+            ),
         )
 
 

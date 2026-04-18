@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -65,15 +66,21 @@ class CardDialog(FormDialog):
         self.cmb_conta.setEditable(False)
         self._fill_contas()
 
+        self.ed_dia_fatura = QSpinBox()
+        self.ed_dia_fatura.setRange(1, 31)
+        self.ed_dia_fatura.setValue(10)
+
         self.ed_obs = QPlainTextEdit()
         self.ed_obs.setFixedHeight(64)
 
         self.form.addRow("Nome *", self.ed_nome)
         self.form.addRow("Conta vinculada", self.cmb_conta)
+        self.form.addRow("Dia de pagamento da fatura *", self.ed_dia_fatura)
         self.form.addRow("Observação", self.ed_obs)
 
         if card:
             self.ed_nome.setText(card.nome)
+            self.ed_dia_fatura.setValue(card.dia_pagamento_fatura)
             self.ed_obs.setPlainText(card.observacao or "")
             if card.account_id is not None:
                 for i in range(self.cmb_conta.count()):
@@ -99,6 +106,7 @@ class CardDialog(FormDialog):
             nome=self.ed_nome.text().strip(),
             account_id=aid if aid is not None else None,
             observacao=self.ed_obs.toPlainText().strip() or None,
+            dia_pagamento_fatura=int(self.ed_dia_fatura.value()),
         )
 
 
@@ -166,7 +174,7 @@ class _CardsCrud(CrudPage):
         super().__init__(
             "Cartões",
             "Cadastre cartões para parcelamentos e assinaturas no crédito.",
-            ["Nome", "Conta vinculada", "Observação"],
+            ["Nome", "Conta vinculada", "Venc. fatura", "Observação"],
         )
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
@@ -177,7 +185,15 @@ class _CardsCrud(CrudPage):
         rows = []
         for c in cards_service.list_all():
             vinc = c.conta_nome or "—"
-            rows.append((c.id or 0, [c.nome, vinc, c.observacao or ""]))
+            rows.append((
+                c.id or 0,
+                [
+                    c.nome,
+                    vinc,
+                    f"Dia {c.dia_pagamento_fatura:02d}",
+                    c.observacao or "",
+                ],
+            ))
         self.model.set_rows(rows)
 
     def _add(self) -> None:

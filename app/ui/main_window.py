@@ -14,9 +14,11 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.accounts_cards_view import AccountsCardsView
+from app.ui.calendar_view import CalendarView
 from app.ui.dashboard_view import DashboardView
 from app.ui.fixed_expenses_view import FixedExpensesView
 from app.ui.history_view import HistoryView
+from app.ui.income_sources_view import IncomeSourcesView
 from app.ui.installments_view import InstallmentsView
 from app.ui.payments_view import PaymentsView
 from app.ui.subscriptions_view import SubscriptionsView
@@ -30,20 +32,24 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(960, 680)
 
         self.dashboard = DashboardView()
+        self.income_sources = IncomeSourcesView()
         self.accounts_cards = AccountsCardsView()
         self.payments = PaymentsView()
         self.installments = InstallmentsView()
         self.subscriptions = SubscriptionsView()
         self.fixed_expenses = FixedExpensesView()
+        self.calendar_page = CalendarView()
         self.history = HistoryView()
 
         self.stack = QStackedWidget()
         self.stack.addWidget(self.dashboard)
+        self.stack.addWidget(self.income_sources)
         self.stack.addWidget(self.accounts_cards)
         self.stack.addWidget(self.payments)
         self.stack.addWidget(self.installments)
         self.stack.addWidget(self.subscriptions)
         self.stack.addWidget(self.fixed_expenses)
+        self.stack.addWidget(self.calendar_page)
         self.stack.addWidget(self.history)
 
         self.sidebar = self._build_sidebar()
@@ -76,11 +82,13 @@ class MainWindow(QMainWindow):
         menu.setObjectName("SidebarList")
         for label in (
             "Dashboard",
+            "Renda",
             "Contas e cartões",
             "Pagamentos",
             "Parcelamentos",
             "Assinaturas",
             "Gastos fixos",
+            "Calendário",
             "Histórico",
         ):
             QListWidgetItem(label, menu)
@@ -108,6 +116,7 @@ class MainWindow(QMainWindow):
         def refresh_all():
             self.dashboard.reload()
             self.history.reload()
+            self.calendar_page.reload()
 
         def refresh_lists():
             self.payments.reload()
@@ -115,7 +124,13 @@ class MainWindow(QMainWindow):
             self.subscriptions.reload()
             self.fixed_expenses.reload()
 
-        for view in (self.payments, self.installments, self.subscriptions, self.fixed_expenses):
+        for view in (
+            self.income_sources,
+            self.payments,
+            self.installments,
+            self.subscriptions,
+            self.fixed_expenses,
+        ):
             if hasattr(view, "data_changed"):
                 view.data_changed.connect(refresh_all)
                 view.data_changed.connect(refresh_lists)

@@ -10,16 +10,19 @@ class Card:
     nome: str
     account_id: Optional[int] = None
     observacao: Optional[str] = None
+    dia_pagamento_fatura: int = 10
     conta_nome: Optional[str] = None  # preenchido em JOINs
 
     @classmethod
     def from_row(cls, row) -> "Card":
         keys = list(row.keys())
         conta = row["conta_nome"] if "conta_nome" in keys else None
+        dia = int(row["dia_pagamento_fatura"]) if "dia_pagamento_fatura" in keys else 10
         return cls(
             id=row["id"],
             nome=row["nome"],
             account_id=row["account_id"] if "account_id" in keys else None,
             observacao=row["observacao"] if "observacao" in keys else None,
+            dia_pagamento_fatura=dia,
             conta_nome=conta,
         )
