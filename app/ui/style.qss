@@ -14,25 +14,35 @@ QWidget#Sidebar {
     color: #F9FAFB;
 }
 
-QListWidget#SidebarList {
+QTreeWidget#SidebarTree {
     background-color: transparent;
     border: none;
     color: #D1D5DB;
     padding: 8px 0;
     outline: 0;
 }
-QListWidget#SidebarList::item {
-    padding: 12px 20px;
+QTreeWidget#SidebarTree::branch {
+    border: none;
+    background: none;
+    image: none;
+    width: 0;
+}
+QTreeWidget#SidebarTree::item {
+    padding: 10px 20px 10px 24px;
     border-left: 3px solid transparent;
 }
-QListWidget#SidebarList::item:hover {
+QTreeWidget#SidebarTree::item:hover {
     background-color: #1F2937;
     color: #FFFFFF;
 }
-QListWidget#SidebarList::item:selected {
+QTreeWidget#SidebarTree::item:selected {
     background-color: #1F2937;
     color: #FFFFFF;
     border-left: 3px solid #4C8BF5;
+}
+QTreeWidget#SidebarTree::item:selected:active {
+    background-color: #1F2937;
+    color: #FFFFFF;
 }
 
 QLabel#SidebarTitle {

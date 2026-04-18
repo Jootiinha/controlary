@@ -3,14 +3,16 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QSplitter,
     QStackedWidget,
+    QStyle,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -78,23 +80,91 @@ class MainWindow(QMainWindow):
 
         self._connect_data_changes()
 
-    def _nav_entries(self) -> list[tuple[str, Optional[int]]]:
+    def _nav_entries(
+        self,
+    ) -> list[tuple[str, list[tuple[str, int, QStyle.StandardPixmap]]]]:
+        """Grupos e itens (rótulo, índice no QStackedWidget, ícone padrão Qt)."""
         return [
-            ("— Cadastros —", None),
-            ("Contas e cartões", 2),
-            ("Categorias", 3),
-            ("Renda", 1),
-            ("— Movimento —", None),
-            ("Pagamentos", 4),
-            ("Parcelamentos", 5),
-            ("Assinaturas", 6),
-            ("Gastos fixos", 7),
-            ("Faturas de cartão", 8),
-            ("— Análise —", None),
-            ("Dashboard", 0),
-            ("Calendário", 9),
-            ("Histórico e análises", 10),
-            ("Investimentos", 11),
+            (
+                "Visão geral",
+                [
+                    (
+                        "Dashboard",
+                        0,
+                        QStyle.StandardPixmap.SP_FileDialogDetailedView,
+                    ),
+                    (
+                        "Calendário",
+                        9,
+                        QStyle.StandardPixmap.SP_FileDialogInfoView,
+                    ),
+                ],
+            ),
+            (
+                "Movimento",
+                [
+                    (
+                        "Pagamentos",
+                        4,
+                        QStyle.StandardPixmap.SP_DialogApplyButton,
+                    ),
+                    (
+                        "Parcelamentos",
+                        5,
+                        QStyle.StandardPixmap.SP_FileDialogListView,
+                    ),
+                    (
+                        "Assinaturas",
+                        6,
+                        QStyle.StandardPixmap.SP_BrowserReload,
+                    ),
+                    (
+                        "Gastos fixos",
+                        7,
+                        QStyle.StandardPixmap.SP_DialogSaveButton,
+                    ),
+                    (
+                        "Faturas de cartão",
+                        8,
+                        QStyle.StandardPixmap.SP_FileIcon,
+                    ),
+                ],
+            ),
+            (
+                "Análise",
+                [
+                    (
+                        "Histórico e análises",
+                        10,
+                        QStyle.StandardPixmap.SP_FileDialogContentsView,
+                    ),
+                    (
+                        "Investimentos",
+                        11,
+                        QStyle.StandardPixmap.SP_ArrowUp,
+                    ),
+                ],
+            ),
+            (
+                "Cadastros",
+                [
+                    (
+                        "Contas e cartões",
+                        2,
+                        QStyle.StandardPixmap.SP_DriveHDIcon,
+                    ),
+                    (
+                        "Categorias",
+                        3,
+                        QStyle.StandardPixmap.SP_DirIcon,
+                    ),
+                    (
+                        "Renda",
+                        1,
+                        QStyle.StandardPixmap.SP_DialogYesButton,
+                    ),
+                ],
+            ),
         ]
 
     def _build_sidebar(self) -> QWidget:
@@ -108,52 +178,77 @@ class MainWindow(QMainWindow):
         subtitle = QLabel("Gestão pessoal · SQLite local")
         subtitle.setObjectName("SidebarSubtitle")
 
-        menu = QListWidget()
-        menu.setObjectName("SidebarList")
-        for label, stack_idx in self._nav_entries():
-            it = QListWidgetItem(label)
-            if stack_idx is None:
-                it.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                it.setData(Qt.ItemDataRole.UserRole, None)
-            else:
-                it.setData(Qt.ItemDataRole.UserRole, stack_idx)
-            menu.addItem(it)
+        tree = QTreeWidget()
+        tree.setObjectName("SidebarTree")
+        tree.setHeaderHidden(True)
+        tree.setIndentation(16)
+        tree.setRootIsDecorated(False)
+        tree.setExpandsOnDoubleClick(False)
+        tree.setAnimated(True)
+        tree.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        first_real = next(
-            i for i in range(menu.count())
-            if menu.item(i).data(Qt.ItemDataRole.UserRole) is not None
-        )
-        menu.setCurrentRow(first_real)
-        menu.currentItemChanged.connect(self._on_nav_item_changed)
-        self._menu = menu
+        header_font = QFont()
+        header_font.setPointSize(10)
+        header_font.setWeight(QFont.Weight.DemiBold)
+
+        for group_name, items in self._nav_entries():
+            hdr = QTreeWidgetItem([group_name.upper()])
+            hdr.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            hdr.setExpanded(True)
+            hdr.setFirstColumnSpanned(True)
+            hdr.setFont(0, header_font)
+            hdr.setForeground(0, QBrush(QColor("#9CA3AF")))
+            hdr.setData(0, Qt.ItemDataRole.UserRole, None)
+            hdr.setSizeHint(0, QSize(0, 36))
+            tree.addTopLevelItem(hdr)
+
+            for label, stack_idx, spix in items:
+                leaf = QTreeWidgetItem(hdr, [label])
+                leaf.setIcon(0, self.style().standardIcon(spix))
+                leaf.setData(0, Qt.ItemDataRole.UserRole, stack_idx)
+                leaf.setFlags(
+                    Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                )
+
+        first_leaf = tree.topLevelItem(0).child(0)
+        tree.setCurrentItem(first_leaf)
+        tree.currentItemChanged.connect(self._on_tree_nav_changed)
+        tree.itemClicked.connect(self._on_tree_item_clicked)
+        self._nav_tree = tree
 
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(title)
         layout.addWidget(subtitle)
-        layout.addWidget(menu, 1)
+        layout.addWidget(tree, 1)
         return sidebar
 
-    def _on_nav_item_changed(
+    def _on_tree_item_clicked(
+        self, item: QTreeWidgetItem, column: int
+    ) -> None:
+        if item.childCount() > 0:
+            item.setExpanded(not item.isExpanded())
+
+    def _on_tree_nav_changed(
         self,
-        current: Optional[QListWidgetItem],
-        previous: Optional[QListWidgetItem],
+        current: Optional[QTreeWidgetItem],
+        previous: Optional[QTreeWidgetItem],
     ) -> None:
         if current is None:
             return
-        idx = current.data(Qt.ItemDataRole.UserRole)
+        idx = current.data(0, Qt.ItemDataRole.UserRole)
         if idx is None:
-            self._menu.blockSignals(True)
+            self._nav_tree.blockSignals(True)
             if previous is not None:
-                self._menu.setCurrentItem(previous)
+                self._nav_tree.setCurrentItem(previous)
             else:
-                for i in range(self._menu.count()):
-                    it = self._menu.item(i)
-                    if it.data(Qt.ItemDataRole.UserRole) is not None:
-                        self._menu.setCurrentRow(i)
+                for i in range(self._nav_tree.topLevelItemCount()):
+                    sec = self._nav_tree.topLevelItem(i)
+                    if sec.childCount() > 0:
+                        self._nav_tree.setCurrentItem(sec.child(0))
                         break
-            self._menu.blockSignals(False)
+            self._nav_tree.blockSignals(False)
             return
         self.stack.setCurrentIndex(int(idx))
         widget = self.stack.currentWidget()
