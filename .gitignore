@@ -23,3 +23,5 @@ Thumbs.db
 *.sqlite
 *.db
 *.db-journal
+
+build/controle-financeiro

@@ -30,7 +30,7 @@ a = Analysis(
     hiddenimports=[],
     hookspath=[],
     runtime_hooks=[],
-    excludes=["tkinter", "test", "unittest"],
+    excludes=[],
     noarchive=False,
 )
 
