@@ -16,9 +16,10 @@ def _ensure_accounts_cards_tables(conn) -> None:
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS accounts (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome        TEXT    NOT NULL COLLATE NOCASE UNIQUE,
-            observacao  TEXT
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome           TEXT    NOT NULL COLLATE NOCASE UNIQUE,
+            observacao     TEXT,
+            saldo_inicial  REAL    NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS cards (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -199,6 +200,16 @@ def _ensure_indexes_on_fk_columns(conn) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_fixed_expenses_category ON fixed_expenses(category_id)"
         )
+    cols = _table_columns(conn, "installments")
+    if "account_id" in cols:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_installments_account ON installments(account_id)"
+        )
+    cols = _table_columns(conn, "income_sources")
+    if "account_id" in cols:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_income_sources_account ON income_sources(account_id)"
+        )
 
 
 def _migrate_categories_table(conn) -> None:
@@ -335,6 +346,97 @@ def _migrate_card_invoices_table(conn) -> None:
     )
 
 
+def _migrate_accounts_saldo_e_transacoes(conn) -> None:
+    cols = _table_columns(conn, "accounts")
+    if "saldo_inicial" not in cols:
+        conn.execute(
+            "ALTER TABLE accounts ADD COLUMN saldo_inicial REAL NOT NULL DEFAULT 0"
+        )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS account_transactions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id       INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            data             TEXT    NOT NULL,
+            valor            REAL    NOT NULL,
+            origem           TEXT    NOT NULL,
+            transaction_key  TEXT    NOT NULL UNIQUE,
+            descricao        TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_account_transactions_account_data
+            ON account_transactions(account_id, data)
+        """
+    )
+
+
+def _migrate_income_sources_account_id(conn) -> None:
+    cols = _table_columns(conn, "income_sources")
+    if "account_id" not in cols:
+        conn.execute(
+            "ALTER TABLE income_sources ADD COLUMN account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL"
+        )
+
+
+def _migrate_installments_account_id(conn) -> None:
+    cols = _table_columns(conn, "installments")
+    if "account_id" not in cols:
+        conn.execute(
+            "ALTER TABLE installments ADD COLUMN account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL"
+        )
+
+
+def _migrate_month_tracking_tables(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS subscription_months (
+            subscription_id INTEGER NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+            ano_mes         TEXT    NOT NULL,
+            status          TEXT    NOT NULL DEFAULT 'pendente',
+            paid_at         TEXT,
+            PRIMARY KEY (subscription_id, ano_mes),
+            CHECK (status IN ('pendente', 'pago'))
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_subscription_months_mes ON subscription_months(ano_mes)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS installment_months (
+            installment_id INTEGER NOT NULL REFERENCES installments(id) ON DELETE CASCADE,
+            ano_mes        TEXT    NOT NULL,
+            status         TEXT    NOT NULL DEFAULT 'pendente',
+            paid_at        TEXT,
+            PRIMARY KEY (installment_id, ano_mes),
+            CHECK (status IN ('pendente', 'pago'))
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_installment_months_mes ON installment_months(ano_mes)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS income_months (
+            income_source_id INTEGER NOT NULL REFERENCES income_sources(id) ON DELETE CASCADE,
+            ano_mes          TEXT    NOT NULL,
+            status           TEXT    NOT NULL DEFAULT 'pendente',
+            recebido_em      TEXT,
+            PRIMARY KEY (income_source_id, ano_mes),
+            CHECK (status IN ('pendente', 'recebido'))
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_income_months_mes ON income_months(ano_mes)"
+    )
+
+
 def _migrate_investments_tables(conn) -> None:
     conn.execute(
         """
@@ -393,4 +495,8 @@ def run_migrations() -> None:
         _migrate_default_category_where_null(conn)
         _migrate_card_invoices_table(conn)
         _migrate_investments_tables(conn)
+        _migrate_accounts_saldo_e_transacoes(conn)
+        _migrate_income_sources_account_id(conn)
+        _migrate_installments_account_id(conn)
+        _migrate_month_tracking_tables(conn)
         _ensure_indexes_on_fk_columns(conn)

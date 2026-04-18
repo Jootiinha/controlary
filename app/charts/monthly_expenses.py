@@ -1,4 +1,4 @@
-"""Gráfico de gastos por mês (últimos 12 meses)."""
+"""Custo de vida: soma dos lançamentos por mês (últimos 12 meses)."""
 from __future__ import annotations
 
 from datetime import date
@@ -8,32 +8,37 @@ from app.database.connection import transaction
 from app.charts.plot_labels import annotate_bars
 
 
+def _rolling_month_keys(months: int) -> tuple[list[str], str, str]:
+    """Meses calendário consecutivos do mais antigo ao mais recente (últimos ``months``)."""
+    today = date.today()
+    y, m = today.year, today.month
+    newest_first: list[str] = []
+    for _ in range(months):
+        newest_first.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    chronological = list(reversed(newest_first))
+    return chronological, chronological[0], chronological[-1]
+
+
 def fetch_data(months: int = 12) -> Dict[str, float]:
+    """Soma **todos** os lançamentos em ``payments`` no mês (cartão e conta)."""
+    keys, first_ym, last_ym = _rolling_month_keys(months)
     with transaction() as conn:
         rows = conn.execute(
             """
-            SELECT substr(data, 1, 7) AS mes, SUM(valor) AS total
+            SELECT substr(data, 1, 7) AS mes, COALESCE(SUM(valor), 0) AS total
               FROM payments
+             WHERE substr(data, 1, 7) BETWEEN ? AND ?
              GROUP BY mes
-             ORDER BY mes DESC
-             LIMIT ?
             """,
-            (months,),
+            (first_ym, last_ym),
         ).fetchall()
 
     dados = {r["mes"]: float(r["total"] or 0) for r in rows}
-
-    today = date.today()
-    year, month = today.year, today.month
-    resultado: Dict[str, float] = {}
-    for _ in range(months):
-        key = f"{year:04d}-{month:02d}"
-        resultado[key] = dados.get(key, 0.0)
-        month -= 1
-        if month == 0:
-            month = 12
-            year -= 1
-    return dict(reversed(list(resultado.items())))
+    return {k: dados.get(k, 0.0) for k in keys}
 
 
 def plot(ax) -> None:
@@ -42,7 +47,11 @@ def plot(ax) -> None:
     valores = list(data.values())
     bars = ax.bar(meses, valores, color="#4C8BF5")
     annotate_bars(ax, bars, valores, fontsize=7, dy=3)
-    ax.set_title("Gastos por mês (últimos 12 meses)")
+    ax.set_title(
+        "Custo de vida por mês — últimos 12 meses\n(todos os lançamentos: cartão e conta)",
+        fontsize=10,
+        pad=10,
+    )
     ax.set_ylabel("R$")
     ax.tick_params(axis="x", rotation=45)
     for label in ax.get_xticklabels():

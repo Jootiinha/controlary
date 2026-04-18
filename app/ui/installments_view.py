@@ -1,22 +1,35 @@
-"""Tela de CRUD de parcelamentos (cartão de crédito)."""
+"""Tela de CRUD de parcelamentos (cartão ou conta corrente)."""
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QDate, Signal
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QDateEdit,
     QDoubleSpinBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QSizePolicy,
     QSpinBox,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from app.models.installment import Installment
-from app.services import cards_service, installments_service
+from app.services import (
+    accounts_service,
+    cards_service,
+    installment_months_service,
+    installments_service,
+)
 from app.ui.categories_view import CategoryDialog
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.category_picker import CategoryPicker
@@ -33,11 +46,11 @@ class InstallmentDialog(FormDialog):
         self._installment = installment
 
         self.ed_nome = QLineEdit()
-        self.ed_nome.setPlaceholderText("Como aparece na fatura")
+        self.ed_nome.setPlaceholderText("Como aparece na fatura ou descrição")
 
-        self.ed_cartao = QComboBox()
-        self.ed_cartao.setEditable(False)
-        self._fill_cartoes()
+        self.ed_origem = QComboBox()
+        self.ed_origem.setEditable(False)
+        self._fill_origem()
 
         self._picker_cat = CategoryPicker(self, allow_empty=False)
         self._picker_cat.connect_new_button(self._nova_categoria)
@@ -66,8 +79,8 @@ class InstallmentDialog(FormDialog):
         self.lbl_calc = QLabel()
         self.lbl_calc.setStyleSheet("color: #6B7280;")
 
-        self.form.addRow("Nome na fatura *", self.ed_nome)
-        self.form.addRow("Cartão *", self.ed_cartao)
+        self.form.addRow("Nome *", self.ed_nome)
+        self.form.addRow("Cartão ou conta *", self.ed_origem)
         self.form.addRow("Categoria *", self._picker_cat)
         self.form.addRow("Mês de referência *", self.ed_mes)
         self.form.addRow("Valor da parcela *", self.ed_valor_parcela)
@@ -82,11 +95,7 @@ class InstallmentDialog(FormDialog):
 
         if installment:
             self.ed_nome.setText(installment.nome_fatura)
-            if installment.cartao_id is not None:
-                for i in range(self.ed_cartao.count()):
-                    if self.ed_cartao.itemData(i) == installment.cartao_id:
-                        self.ed_cartao.setCurrentIndex(i)
-                        break
+            self._select_origem(installment)
             try:
                 year, month = installment.mes_referencia.split("-")
                 self.ed_mes.setDate(QDate(int(year), int(month), 1))
@@ -101,6 +110,22 @@ class InstallmentDialog(FormDialog):
 
         self._update_calc()
 
+    def _select_origem(self, inst: Installment) -> None:
+        for i in range(self.ed_origem.count()):
+            data = self.ed_origem.itemData(i)
+            if not data or not isinstance(data, str):
+                continue
+            kind, _, mid = data.partition(":")
+            if not mid.isdigit():
+                continue
+            iid = int(mid)
+            if inst.cartao_id is not None and kind == "c" and iid == inst.cartao_id:
+                self.ed_origem.setCurrentIndex(i)
+                return
+            if inst.account_id is not None and kind == "a" and iid == inst.account_id:
+                self.ed_origem.setCurrentIndex(i)
+                return
+
     def _nova_categoria(self) -> None:
         dlg = CategoryDialog(self)
         if dlg.exec():
@@ -109,11 +134,15 @@ class InstallmentDialog(FormDialog):
             categories_service.create(dlg.payload())
             self._picker_cat.reload_from_db()
 
-    def _fill_cartoes(self) -> None:
-        self.ed_cartao.clear()
-        self.ed_cartao.addItem("(Selecione o cartão)", None)
+    def _fill_origem(self) -> None:
+        self.ed_origem.clear()
+        self.ed_origem.addItem("(Selecione cartão ou conta)", None)
         for c in cards_service.list_all():
-            self.ed_cartao.addItem(c.nome, c.id)
+            if c.id is not None:
+                self.ed_origem.addItem(f"Cartão · {c.nome}", f"c:{c.id}")
+        for a in accounts_service.list_all():
+            if a.id is not None:
+                self.ed_origem.addItem(f"Conta · {a.nome}", f"a:{a.id}")
 
     def _update_calc(self) -> None:
         total = self.ed_total.value()
@@ -135,9 +164,9 @@ class InstallmentDialog(FormDialog):
 
     def validate(self) -> tuple[bool, str | None]:
         if not self.ed_nome.text().strip():
-            return False, "Nome na fatura é obrigatório"
-        if self.ed_cartao.currentData() is None:
-            return False, "Selecione um cartão cadastrado em “Contas e cartões”"
+            return False, "Nome é obrigatório"
+        if self.ed_origem.currentData() is None:
+            return False, "Selecione cartão ou conta em “Contas e cartões”"
         if self.ed_valor_parcela.value() <= 0:
             return False, "Valor da parcela deve ser maior que zero"
         if self.ed_pagas.value() > self.ed_total.value():
@@ -149,11 +178,21 @@ class InstallmentDialog(FormDialog):
     def payload(self) -> Installment:
         date_q = self.ed_mes.date()
         mes_ref = f"{date_q.year():04d}-{date_q.month():02d}"
-        cid = self.ed_cartao.currentData()
+        raw = self.ed_origem.currentData()
+        cartao_id: Optional[int] = None
+        account_id: Optional[int] = None
+        if raw and isinstance(raw, str):
+            kind, _, mid = raw.partition(":")
+            if mid.isdigit():
+                if kind == "c":
+                    cartao_id = int(mid)
+                elif kind == "a":
+                    account_id = int(mid)
         return Installment(
             id=self._installment.id if self._installment else None,
             nome_fatura=self.ed_nome.text().strip(),
-            cartao_id=int(cid) if cid is not None else None,
+            cartao_id=cartao_id,
+            account_id=account_id,
             mes_referencia=mes_ref,
             valor_parcela=float(self.ed_valor_parcela.value()),
             total_parcelas=int(self.ed_total.value()),
@@ -163,15 +202,15 @@ class InstallmentDialog(FormDialog):
         )
 
 
-class InstallmentsView(CrudPage):
+class _InstallmentsCrud(CrudPage):
     data_changed = Signal()
 
     def __init__(self) -> None:
         super().__init__(
             "Parcelamentos",
-            "Controle compras parceladas e acompanhe o saldo devedor.",
+            "Controle compras parceladas no cartão ou à vista na conta.",
             [
-                "Nome", "Cartão", "Categoria", "Mês Ref.", "Parcela", "Total",
+                "Nome", "Meio", "Categoria", "Mês Ref.", "Parcela", "Total",
                 "Pagas", "Restantes", "Saldo devedor", "Status",
             ],
         )
@@ -207,11 +246,11 @@ class InstallmentsView(CrudPage):
         for i in installments_service.list_all():
             if i.id is not None:
                 self._by_id[i.id] = i
-            cnome = i.cartao_nome or "—"
+            meio = i.meio_label
             cat = i.categoria_nome or "—"
             rows.append((i.id or 0, [
                 i.nome_fatura,
-                cnome,
+                meio,
                 cat,
                 format_month_br(i.mes_referencia),
                 format_currency(i.valor_parcela),
@@ -238,11 +277,11 @@ class InstallmentsView(CrudPage):
         )
 
     def _add(self) -> None:
-        if not cards_service.list_all():
+        if not cards_service.list_all() and not accounts_service.list_all():
             QMessageBox.information(
                 self,
-                "Cadastre um cartão",
-                "Cadastre ao menos um cartão em “Contas e cartões” antes de parcelamentos.",
+                "Cadastre cartão ou conta",
+                "Cadastre ao menos um cartão ou uma conta em “Contas e cartões”.",
             )
             return
         dlg = InstallmentDialog(self)
@@ -278,3 +317,114 @@ class InstallmentsView(CrudPage):
             installments_service.delete(iid)
             self.reload()
             self.data_changed.emit()
+
+
+class _InstallmentMonthlyControl(QWidget):
+    """Parcelas em conta na competência do mês de referência."""
+    data_changed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        hint = QLabel(
+            "Parcelamentos à vista na conta cujo mês de referência coincide com a competência. "
+            "Marque Pago quando debitar a parcela."
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("PageSubtitle")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Competência:"))
+        self.dt = QDateEdit()
+        self.dt.setDisplayFormat("MM/yyyy")
+        self.dt.setCalendarPopup(True)
+        self.dt.setDate(QDate.currentDate())
+        self.dt.dateChanged.connect(self.reload_table)
+        row.addWidget(self.dt)
+        row.addStretch()
+        self.tbl = QTableWidget(0, 5)
+        self.tbl.setHorizontalHeaderLabels(
+            ["Nome", "Valor parcela", "Conta", "Mês ref.", "Situação no mês"]
+        )
+        self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tbl.setSelectionMode(QAbstractItemView.NoSelection)
+        self.tbl.verticalHeader().setVisible(False)
+        lay = QVBoxLayout(self)
+        lay.addWidget(hint)
+        lay.addLayout(row)
+        lay.addWidget(self.tbl, 1)
+        self.reload_table()
+
+    def ano_mes(self) -> str:
+        d = self.dt.date()
+        return f"{d.year():04d}-{d.month():02d}"
+
+    def reload_table(self) -> None:
+        ym = self.ano_mes()
+        items = [
+            i
+            for i in installments_service.list_all()
+            if i.status == "ativo"
+            and i.account_id is not None
+            and i.cartao_id is None
+            and i.mes_referencia == ym
+            and i.id is not None
+        ]
+        self.tbl.setRowCount(len(items))
+        align_left = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+        align_val = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
+        for i, inst in enumerate(items):
+            assert inst.id is not None
+            iid = inst.id
+            it_n = QTableWidgetItem(inst.nome_fatura)
+            it_n.setTextAlignment(align_left)
+            self.tbl.setItem(i, 0, it_n)
+            it_v = QTableWidgetItem(format_currency(inst.valor_parcela))
+            it_v.setTextAlignment(align_val)
+            self.tbl.setItem(i, 1, it_v)
+            acc = accounts_service.get(int(inst.account_id))
+            it_c = QTableWidgetItem(acc.nome if acc else "—")
+            it_c.setTextAlignment(align_left)
+            self.tbl.setItem(i, 2, it_c)
+            it_m = QTableWidgetItem(format_month_br(inst.mes_referencia))
+            it_m.setTextAlignment(align_left)
+            self.tbl.setItem(i, 3, it_m)
+            cb = QComboBox()
+            cb.addItems(["Pendente", "Pago"])
+            pago = installment_months_service.is_paid(iid, ym)
+            cb.blockSignals(True)
+            cb.setCurrentIndex(1 if pago else 0)
+            cb.blockSignals(False)
+            cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+            def make_handler(inst_id: int, combo: QComboBox, competencia: str):
+                def on_change(_idx: int) -> None:
+                    want = combo.currentIndex() == 1
+                    installment_months_service.set_month_status(
+                        inst_id, competencia, pago=want
+                    )
+                    self.data_changed.emit()
+
+                return on_change
+
+            cb.currentIndexChanged.connect(make_handler(iid, cb, ym))
+            self.tbl.setCellWidget(i, 4, cb)
+
+
+class InstallmentsView(QWidget):
+    data_changed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._crud = _InstallmentsCrud()
+        self._month = _InstallmentMonthlyControl()
+        self._crud.data_changed.connect(self.data_changed.emit)
+        self._month.data_changed.connect(self.data_changed.emit)
+        tabs = QTabWidget()
+        tabs.addTab(self._crud, "Cadastro")
+        tabs.addTab(self._month, "Situação mensal (conta)")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(tabs)
+
+    def reload(self) -> None:
+        self._crud.reload()
+        self._month.reload_table()

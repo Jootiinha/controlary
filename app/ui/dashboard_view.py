@@ -4,10 +4,12 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QScrollArea,
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
@@ -15,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.charts import year_expense_evolution
+from app.charts import monthly_expenses, year_expense_evolution
 from app.services import calendar_service, dashboard_service, investments_service
 from app.services.calendar_service import CalendarEvent
 from app.ui.widgets.card import KpiCard
@@ -45,17 +47,17 @@ class DashboardView(QWidget):
         )
         self.card_previsto = KpiCard(
             "Previsto do mês",
-            subtitle="Faturas + assinaturas (conta) + parcelas à vista + fixos",
+            subtitle="Faturas + recorrentes + fixos + avulsos (conta)",
             compact=True,
         )
         self.card_margem_previsto = KpiCard(
-            "Saldo projetado", subtitle="Renda − previsto", compact=True
+            "Margem de fluxo", subtitle="Renda − previsto do mês", compact=True
         )
 
-        # Linha 2 — Compromissos recorrentes
-        self.card_parcelas_mes = KpiCard(
-            "Parcelas do mês (sem cartão)",
-            subtitle="0 ativos · saldo —",
+        # Linha 2 — Investimentos e compromissos recorrentes
+        self.card_invest = KpiCard(
+            "Total investido",
+            subtitle="Soma do valor aplicado (ativos)",
             compact=True,
         )
         self.card_fixos_mes = KpiCard(
@@ -75,6 +77,23 @@ class DashboardView(QWidget):
             "fatura de cartão, assinatura em conta, fixo pendente, parcela à vista."
         )
 
+        self.card_saldo_contas = KpiCard(
+            "Saldo em contas",
+            subtitle="Saldo inicial + movimentações até hoje",
+            compact=True,
+        )
+        self.card_saldo_fim_mes = KpiCard(
+            "Saldo fim do mês (est.)",
+            subtitle="Contas + entradas previstas − compromissos a pagar",
+            compact=True,
+        )
+        self.card_saldo_fim_mes.setToolTip(
+            "Patrimônio líquido estimado: soma dos saldos em conta corrente, "
+            "mais renda ainda esperada no mês (dia ≥ hoje e não marcada como recebida), "
+            "menos fixos pendentes, faturas de cartão em aberto, assinaturas em conta "
+            "e parcelas em conta ainda não marcadas como pagas na competência."
+        )
+
         line1 = (
             self.card_renda,
             self.card_gasto_mes,
@@ -82,18 +101,11 @@ class DashboardView(QWidget):
             self.card_margem_previsto,
         )
         line2 = (
-            self.card_parcelas_mes,
+            self.card_invest,
             self.card_fixos_mes,
             self.card_assinaturas,
             self.card_proximo,
         )
-
-        self.card_invest = KpiCard(
-            "Total investido",
-            subtitle="Soma do valor aplicado (ativos)",
-            compact=True,
-        )
-
         kpi_grid = QGridLayout()
         kpi_grid.setContentsMargins(0, 0, 0, 0)
         kpi_grid.setHorizontalSpacing(12)
@@ -106,7 +118,9 @@ class DashboardView(QWidget):
             kpi_grid.addWidget(w, 0, col, align)
         for col, w in enumerate(line2):
             kpi_grid.addWidget(w, 1, col, align)
-        kpi_grid.addWidget(self.card_invest, 2, 0, 1, 4, align)
+        # Terceira linha: só 2 KPIs — cada um ocupa 2 colunas para não deixar metade da faixa vazia
+        kpi_grid.addWidget(self.card_saldo_contas, 2, 0, 1, 2, align)
+        kpi_grid.addWidget(self.card_saldo_fim_mes, 2, 2, 1, 2, align)
 
         kpi_wrap = QWidget()
         kpi_wrap.setLayout(kpi_grid)
@@ -121,27 +135,47 @@ class DashboardView(QWidget):
         self.lbl_venc.setObjectName("PageSubtitle")
         self.tbl_venc = self._make_table_venc(["Data", "Tipo", "Descrição", "Valor"])
 
+        venc_wrap = QWidget()
+        venc_wrap.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        venc_lay = QVBoxLayout(venc_wrap)
+        venc_lay.setContentsMargins(0, 0, 0, 0)
+        venc_lay.setSpacing(6)
+        venc_lay.addWidget(self.lbl_venc)
+        venc_lay.addWidget(self.tbl_venc)
+
         self.chart_year = ChartCanvas(
             year_expense_evolution.plot,
             width=8.0,
-            height=2.6,
+            height=3.2,
             dpi=100,
         )
-        self.chart_year.setMinimumHeight(180)
+        self.chart_year.setMinimumHeight(280)
         self.chart_year.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
 
-        lbl_chart = QLabel("Evolução das despesas no ano")
-        lbl_chart.setObjectName("PageSubtitle")
+        self.chart_cost_12m = ChartCanvas(
+            monthly_expenses.plot,
+            width=8.0,
+            height=3.2,
+            dpi=100,
+        )
+        self.chart_cost_12m.setMinimumHeight(280)
+        self.chart_cost_12m.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
 
         chart_box = QWidget()
         chart_lay = QVBoxLayout(chart_box)
         chart_lay.setContentsMargins(0, 0, 0, 0)
-        chart_lay.setSpacing(6)
-        chart_lay.addWidget(lbl_chart)
+        chart_lay.setSpacing(10)
         chart_lay.addWidget(self.chart_year, 1)
+        chart_lay.addWidget(self.chart_cost_12m, 1)
 
         self.tbl_contas = self._make_table(["Conta", "Total do mês"])
         self.tbl_formas = self._make_table(["Forma de pagamento", "Total do mês"])
@@ -155,20 +189,40 @@ class DashboardView(QWidget):
             self._titled("Gastos por forma de pagamento", self.tbl_formas), 1
         )
 
-        bottom_row = QHBoxLayout()
+        bottom_row_wrap = QWidget()
+        bottom_row_wrap.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        bottom_row_wrap.setMinimumHeight(600)
+        bottom_row = QHBoxLayout(bottom_row_wrap)
+        bottom_row.setContentsMargins(0, 0, 0, 0)
         bottom_row.setSpacing(14)
-        bottom_row.addWidget(chart_box, 2)
+        bottom_row.addWidget(chart_box, 3)
         bottom_row.addWidget(tables_box, 1)
 
-        inner = QVBoxLayout(self)
+        content = QWidget()
+        content.setObjectName("DashboardContent")
+        inner = QVBoxLayout(content)
         inner.setContentsMargins(24, 24, 24, 24)
         inner.setSpacing(14)
         inner.addWidget(self.lbl_title)
         inner.addWidget(self.lbl_subtitle)
         inner.addWidget(kpi_wrap, 0)
-        inner.addWidget(self.lbl_venc)
-        inner.addWidget(self.tbl_venc, 0)
-        inner.addLayout(bottom_row, 1)
+        inner.addWidget(venc_wrap, 0)
+        inner.addWidget(bottom_row_wrap, 1)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("DashboardScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(content)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(scroll)
 
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -184,11 +238,10 @@ class DashboardView(QWidget):
         tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
         tbl.setSelectionMode(QAbstractItemView.NoSelection)
         tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        tbl.setMinimumHeight(96)
-        tbl.setMaximumHeight(180)
+        tbl.setFixedHeight(160)
         tbl.setSizePolicy(
             QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Fixed,
         )
         return tbl
 
@@ -199,7 +252,7 @@ class DashboardView(QWidget):
         tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
         tbl.setSelectionMode(QAbstractItemView.NoSelection)
         tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        tbl.setMinimumHeight(80)
+        tbl.setMinimumHeight(220)
         tbl.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -226,23 +279,21 @@ class DashboardView(QWidget):
         self.card_previsto.set_value(format_currency(data.previsto_mes))
         self.card_previsto.setToolTip(
             "Inclui faturas de cartão em aberto (valor registrado ou sugerido), "
-            "assinaturas debitadas em conta, parcelas sem cartão no mês e fixos pendentes."
+            "assinaturas em conta, parcelas sem cartão no mês, fixos pendentes e "
+            "todos os lançamentos avulsos em conta no mês (pagamentos sem cartão). "
+            "Se o mesmo gasto estiver como assinatura/fixo e também lançado em Pagamentos, "
+            "pode haver sobreposição."
         )
         self.card_margem_previsto.set_value(format_currency(data.margem_apos_previsto))
+
+        self.card_saldo_contas.set_value(format_currency(data.saldo_em_contas))
+        self.card_saldo_fim_mes.set_value(format_currency(data.saldo_projetado_fim_mes))
 
         self.card_invest.set_value(format_currency(data.total_investido))
         self.card_invest.set_subtitle(
             f"{len(investments_service.list_all())} posição(ões) ativa(s)"
         )
 
-        self.card_parcelas_mes.set_value(format_currency(data.parcelas_mes_atual))
-        self.card_parcelas_mes.set_subtitle(
-            f"{data.parcelamentos_ativos_qtd} ativos · saldo "
-            f"{format_currency(data.saldo_devedor_total)}"
-        )
-        self.card_parcelas_mes.setToolTip(
-            "Parcelas cuja cobrança não está em cartão (demais parcelas entram na fatura)."
-        )
         self.card_fixos_mes.set_value(format_currency(data.fixos_pendentes_mes))
         self.card_fixos_mes.set_subtitle(
             f"{data.fixos_ativos_qtd} ativos · restante ano "
@@ -270,6 +321,7 @@ class DashboardView(QWidget):
         self._fill_vencimentos(data.proximos_vencimentos)
 
         self.chart_year.refresh()
+        self.chart_cost_12m.refresh()
 
     def _fill_table(self, tbl: QTableWidget, rows: list[tuple[str, float]]) -> None:
         if not rows:

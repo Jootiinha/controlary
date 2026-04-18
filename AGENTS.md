@@ -90,6 +90,13 @@ def _migrate_cards_dia_pagamento_fatura(conn) -> None:
 - Ao projetar um "dia do mês" (ex.: `dia_recebimento`, `dia_pagamento_fatura`) que não existe no mês alvo, use o **último dia do mês** (helper `_ultimo_dia_mes` em `calendar_service.py`).
 - Moeda é `float` em reais; formate sempre via `format_currency`.
 
+## Livro-caixa (saldo em contas)
+
+- Cada conta tem `saldo_inicial` e movimentações na tabela `account_transactions` (campo único `transaction_key` para idempotência).
+- Débitos automáticos: pagamentos em conta, fatura de cartão paga, fixo marcado como pago (sem duplicar o espelho em Pagamentos — `payments_service.create(..., record_ledger=False)`), assinaturas em conta e parcelas em conta nas abas **Situação mensal**, renda com conta de crédito ao marcar recebido.
+- Ajustes manuais: tela **Contas e cartões** → **Ajustar saldo…**
+- Bases de dados antigas: defina o **saldo inicial** de cada conta coerente com o extrato; histórico anterior não é recriado automaticamente no livro-caixa.
+
 ## Antes de concluir uma tarefa
 
 1. Rodar `make check` (ou `poetry run python -m compileall -q app main.py`).

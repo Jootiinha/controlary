@@ -1,11 +1,14 @@
 """Gastos fixos mensais (aluguel, luz etc.) com status pago/pendente por competência."""
 from __future__ import annotations
 
+import sqlite3
+from calendar import monthrange
 from datetime import date
 from typing import List, Optional, Tuple
 
 from app.database.connection import transaction
 from app.models.fixed_expense import FixedExpense
+from app.services import accounts_service
 
 
 def _status_row(conn, fe_id: int, ano_mes: str) -> Optional[str]:
@@ -26,10 +29,40 @@ def is_paid(fe_id: int, ano_mes: str) -> bool:
     return st == "pago"
 
 
-def set_month_status(fe_id: int, ano_mes: str, pago: bool) -> None:
+def set_month_status(
+    fe_id: int,
+    ano_mes: str,
+    pago: bool,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
     status = "pago" if pago else "pendente"
-    with transaction() as conn:
-        row = conn.execute(
+
+    def _apply(c: sqlite3.Connection) -> None:
+        fe = c.execute(
+            """
+            SELECT valor_mensal, conta_id, dia_referencia
+              FROM fixed_expenses
+             WHERE id = ?
+            """,
+            (fe_id,),
+        ).fetchone()
+        key = accounts_service.transaction_key_fixed(fe_id, ano_mes)
+        if not pago:
+            accounts_service.remove_transaction_key(key, conn=c)
+        elif fe and fe["conta_id"]:
+            y, m = map(int, ano_mes.split("-"))
+            dia = min(int(fe["dia_referencia"] or 5), monthrange(y, m)[1])
+            data = f"{y:04d}-{m:02d}-{dia:02d}"
+            accounts_service.upsert_transaction(
+                int(fe["conta_id"]),
+                -float(fe["valor_mensal"]),
+                data,
+                "fixo",
+                key,
+                None,
+                conn=c,
+            )
+        row = c.execute(
             """
             SELECT 1 FROM fixed_expense_months
              WHERE fixed_expense_id = ? AND ano_mes = ?
@@ -37,7 +70,7 @@ def set_month_status(fe_id: int, ano_mes: str, pago: bool) -> None:
             (fe_id, ano_mes),
         ).fetchone()
         if row:
-            conn.execute(
+            c.execute(
                 """
                 UPDATE fixed_expense_months SET status = ?
                  WHERE fixed_expense_id = ? AND ano_mes = ?
@@ -45,13 +78,19 @@ def set_month_status(fe_id: int, ano_mes: str, pago: bool) -> None:
                 (status, fe_id, ano_mes),
             )
         else:
-            conn.execute(
+            c.execute(
                 """
                 INSERT INTO fixed_expense_months (fixed_expense_id, ano_mes, status)
                 VALUES (?, ?, ?)
                 """,
                 (fe_id, ano_mes, status),
             )
+
+    if conn is not None:
+        _apply(conn)
+    else:
+        with transaction() as c:
+            _apply(c)
 
 
 def list_active() -> List[FixedExpense]:
@@ -148,6 +187,9 @@ def update(fe: FixedExpense) -> None:
 
 def delete(fe_id: int) -> None:
     with transaction() as conn:
+        accounts_service.remove_transaction_keys_like_prefix(
+            f"fixed:{fe_id}:", conn=conn
+        )
         conn.execute("DELETE FROM fixed_expenses WHERE id = ?", (fe_id,))
 
 

@@ -1,6 +1,10 @@
 """Distribuição do valor aplicado por tipo de investimento."""
 from __future__ import annotations
 
+from typing import Any
+
+from matplotlib.patches import Wedge
+
 from app.services import investments_service
 from app.utils.formatting import format_currency
 
@@ -43,3 +47,22 @@ def plot(ax) -> None:
         fontsize=8,
     )
     ax.set_title("Investimentos ativos por tipo (valor aplicado)")
+
+    def _hover_format(artist: Any, target: Any, index: int | None) -> str:
+        if not isinstance(artist, Wedge):
+            return ""
+        idx = int(index) if index is not None else None
+        if idx is None:
+            wedges = [p for p in ax.patches if isinstance(p, Wedge)]
+            try:
+                idx = wedges.index(artist)
+            except ValueError:
+                return ""
+        if not (0 <= idx < len(labels)):
+            return ""
+        val = values[idx]
+        lbl = labels[idx]
+        pct = 100.0 * val / total if total else 0.0
+        return f"{lbl}\n{format_currency(val)}\n({pct:.1f}% do total)"
+
+    ax._hover_format = _hover_format

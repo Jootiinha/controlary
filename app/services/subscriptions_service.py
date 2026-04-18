@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from app.database.connection import transaction
 from app.models.subscription import Subscription
+from app.services import accounts_service
 
 
 def list_all() -> List[Subscription]:
@@ -128,6 +129,9 @@ def _meio_label(conn, account_id: Optional[int], card_id: Optional[int]) -> Opti
 
 def delete(sub_id: int) -> None:
     with transaction() as conn:
+        accounts_service.remove_transaction_keys_like_prefix(
+            f"subscription:{sub_id}:", conn=conn
+        )
         conn.execute("DELETE FROM subscriptions WHERE id = ?", (sub_id,))
 
 

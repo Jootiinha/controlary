@@ -16,7 +16,9 @@ class Installment:
     status: str = "ativo"
     observacao: Optional[str] = None
     category_id: Optional[int] = None
+    account_id: Optional[int] = None
     cartao_nome: Optional[str] = None
+    account_nome: Optional[str] = None
     categoria_nome: Optional[str] = None
 
     @property
@@ -31,15 +33,25 @@ class Installment:
     def saldo_devedor(self) -> float:
         return round(self.valor_parcela * self.parcelas_restantes, 2)
 
+    @property
+    def meio_label(self) -> str:
+        if self.cartao_nome:
+            return self.cartao_nome
+        if self.account_nome:
+            return f"Conta · {self.account_nome}"
+        return "—"
+
     @classmethod
     def from_row(cls, row) -> "Installment":
         keys = list(row.keys())
         cid = row["cartao_id"] if "cartao_id" in keys else None
+        aid = row["account_id"] if "account_id" in keys else None
         cnome = None
         if "cartao_nome" in keys and row["cartao_nome"]:
             cnome = row["cartao_nome"]
         elif "cartao" in keys and row["cartao"]:
             cnome = row["cartao"]
+        anome = row["account_nome"] if "account_nome" in keys and row["account_nome"] else None
         cat_id = row["category_id"] if "category_id" in keys else None
         catn = row["categoria_nome"] if "categoria_nome" in keys and row["categoria_nome"] else None
         return cls(
@@ -53,6 +65,8 @@ class Installment:
             status=row["status"],
             observacao=row["observacao"],
             category_id=cat_id,
+            account_id=aid,
             cartao_nome=cnome,
+            account_nome=anome,
             categoria_nome=catn,
         )

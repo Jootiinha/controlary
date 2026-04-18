@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from app.database.connection import transaction
 from app.models.installment import Installment
+from app.services import accounts_service
 
 
 def _compute_status(parcelas_pagas: int, total_parcelas: int) -> str:
@@ -15,9 +16,10 @@ def list_all() -> List[Installment]:
     with transaction() as conn:
         rows = conn.execute(
             """
-            SELECT i.*, c.nome AS cartao_nome, cat.nome AS categoria_nome
+            SELECT i.*, c.nome AS cartao_nome, a.nome AS account_nome, cat.nome AS categoria_nome
               FROM installments i
               LEFT JOIN cards c ON c.id = i.cartao_id
+              LEFT JOIN accounts a ON a.id = i.account_id
               LEFT JOIN categories cat ON cat.id = i.category_id
              ORDER BY i.status ASC, i.id DESC
             """
@@ -29,9 +31,10 @@ def get(installment_id: int) -> Optional[Installment]:
     with transaction() as conn:
         row = conn.execute(
             """
-            SELECT i.*, c.nome AS cartao_nome, cat.nome AS categoria_nome
+            SELECT i.*, c.nome AS cartao_nome, a.nome AS account_nome, cat.nome AS categoria_nome
               FROM installments i
               LEFT JOIN cards c ON c.id = i.cartao_id
+              LEFT JOIN accounts a ON a.id = i.account_id
               LEFT JOIN categories cat ON cat.id = i.category_id
              WHERE i.id = ?
             """,
@@ -41,27 +44,57 @@ def get(installment_id: int) -> Optional[Installment]:
 
 
 def create(installment: Installment) -> int:
-    if not installment.cartao_id:
-        raise ValueError("Selecione um cartão")
+    has_card = installment.cartao_id is not None
+    has_acc = installment.account_id is not None
+    if has_card == has_acc:
+        raise ValueError("Informe cartão ou conta corrente (apenas um)")
     status = _compute_status(installment.parcelas_pagas, installment.total_parcelas)
     with transaction() as conn:
+        if has_card:
+            row = conn.execute(
+                "SELECT nome FROM cards WHERE id = ?", (installment.cartao_id,)
+            ).fetchone()
+            if not row:
+                raise ValueError("Cartão inválido")
+            nome_ref = row["nome"]
+            cur = conn.execute(
+                """
+                INSERT INTO installments (
+                    nome_fatura, cartao, cartao_id, account_id, mes_referencia, valor_parcela,
+                    total_parcelas, parcelas_pagas, status, observacao, category_id
+                ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    installment.nome_fatura,
+                    nome_ref,
+                    installment.cartao_id,
+                    installment.mes_referencia,
+                    installment.valor_parcela,
+                    installment.total_parcelas,
+                    installment.parcelas_pagas,
+                    status,
+                    installment.observacao,
+                    installment.category_id,
+                ),
+            )
+            return int(cur.lastrowid)
         row = conn.execute(
-            "SELECT nome FROM cards WHERE id = ?", (installment.cartao_id,)
+            "SELECT nome FROM accounts WHERE id = ?", (installment.account_id,)
         ).fetchone()
         if not row:
-            raise ValueError("Cartão inválido")
-        nome_cartao = row["nome"]
+            raise ValueError("Conta inválida")
+        nome_ref = f"Conta · {row['nome']}"
         cur = conn.execute(
             """
             INSERT INTO installments (
-                nome_fatura, cartao, cartao_id, mes_referencia, valor_parcela,
+                nome_fatura, cartao, cartao_id, account_id, mes_referencia, valor_parcela,
                 total_parcelas, parcelas_pagas, status, observacao, category_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 installment.nome_fatura,
-                nome_cartao,
-                installment.cartao_id,
+                nome_ref,
+                installment.account_id,
                 installment.mes_referencia,
                 installment.valor_parcela,
                 installment.total_parcelas,
@@ -77,28 +110,60 @@ def create(installment: Installment) -> int:
 def update(installment: Installment) -> None:
     if installment.id is None:
         raise ValueError("Parcelamento sem id não pode ser atualizado")
-    if not installment.cartao_id:
-        raise ValueError("Selecione um cartão")
+    has_card = installment.cartao_id is not None
+    has_acc = installment.account_id is not None
+    if has_card == has_acc:
+        raise ValueError("Informe cartão ou conta corrente (apenas um)")
     status = _compute_status(installment.parcelas_pagas, installment.total_parcelas)
     with transaction() as conn:
+        if has_card:
+            row = conn.execute(
+                "SELECT nome FROM cards WHERE id = ?", (installment.cartao_id,)
+            ).fetchone()
+            if not row:
+                raise ValueError("Cartão inválido")
+            nome_ref = row["nome"]
+            conn.execute(
+                """
+                UPDATE installments
+                   SET nome_fatura = ?, cartao = ?, cartao_id = ?, account_id = NULL,
+                       mes_referencia = ?, valor_parcela = ?, total_parcelas = ?,
+                       parcelas_pagas = ?, status = ?, observacao = ?, category_id = ?
+                 WHERE id = ?
+                """,
+                (
+                    installment.nome_fatura,
+                    nome_ref,
+                    installment.cartao_id,
+                    installment.mes_referencia,
+                    installment.valor_parcela,
+                    installment.total_parcelas,
+                    installment.parcelas_pagas,
+                    status,
+                    installment.observacao,
+                    installment.category_id,
+                    installment.id,
+                ),
+            )
+            return
         row = conn.execute(
-            "SELECT nome FROM cards WHERE id = ?", (installment.cartao_id,)
+            "SELECT nome FROM accounts WHERE id = ?", (installment.account_id,)
         ).fetchone()
         if not row:
-            raise ValueError("Cartão inválido")
-        nome_cartao = row["nome"]
+            raise ValueError("Conta inválida")
+        nome_ref = f"Conta · {row['nome']}"
         conn.execute(
             """
             UPDATE installments
-               SET nome_fatura = ?, cartao = ?, cartao_id = ?, mes_referencia = ?,
-                   valor_parcela = ?, total_parcelas = ?, parcelas_pagas = ?,
-                   status = ?, observacao = ?, category_id = ?
+               SET nome_fatura = ?, cartao = ?, cartao_id = NULL, account_id = ?,
+                   mes_referencia = ?, valor_parcela = ?, total_parcelas = ?,
+                   parcelas_pagas = ?, status = ?, observacao = ?, category_id = ?
              WHERE id = ?
             """,
             (
                 installment.nome_fatura,
-                nome_cartao,
-                installment.cartao_id,
+                nome_ref,
+                installment.account_id,
                 installment.mes_referencia,
                 installment.valor_parcela,
                 installment.total_parcelas,
@@ -137,6 +202,9 @@ def increment_paid(installment_id: int, delta: int = 1) -> None:
 
 def delete(installment_id: int) -> None:
     with transaction() as conn:
+        accounts_service.remove_transaction_keys_like_prefix(
+            f"installment:{installment_id}:", conn=conn
+        )
         conn.execute("DELETE FROM installments WHERE id = ?", (installment_id,))
 
 

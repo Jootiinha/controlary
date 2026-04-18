@@ -6,7 +6,7 @@ from typing import Any, List, Optional
 
 from app.database.connection import transaction
 from app.models.card_invoice import CardInvoice
-from app.services import installments_service
+from app.services import accounts_service, installments_service
 
 
 @dataclass(frozen=True)
@@ -206,6 +206,26 @@ def mark_paid(
             """,
             (pago_em, conta_pagamento_id, invoice_id),
         )
+        inv_row = conn.execute(
+            """
+            SELECT valor_total, ano_mes FROM card_invoices WHERE id = ?
+            """,
+            (invoice_id,),
+        ).fetchone()
+        if (
+            conta_pagamento_id is not None
+            and inv_row
+            and float(inv_row["valor_total"] or 0) > 0
+        ):
+            accounts_service.upsert_transaction(
+                int(conta_pagamento_id),
+                -float(inv_row["valor_total"]),
+                pago_em,
+                "fatura",
+                accounts_service.transaction_key_invoice(invoice_id),
+                f"Fatura {inv_row['ano_mes']}",
+                conn=conn,
+            )
     inst_ids = installments_service.list_active_ids_for_card_month(cartao_id, ano_mes)
     for iid in inst_ids:
         installments_service.increment_paid(iid, 1)
@@ -215,6 +235,14 @@ def set_status(invoice_id: int, status: str) -> None:
     if status not in ("aberta", "fechada", "paga"):
         raise ValueError("Status inválido")
     with transaction() as conn:
+        row = conn.execute(
+            "SELECT status FROM card_invoices WHERE id = ?",
+            (invoice_id,),
+        ).fetchone()
+        if row and row["status"] == "paga" and status != "paga":
+            accounts_service.remove_transaction_key(
+                accounts_service.transaction_key_invoice(invoice_id), conn=conn
+            )
         conn.execute(
             "UPDATE card_invoices SET status = ? WHERE id = ?",
             (status, invoice_id),

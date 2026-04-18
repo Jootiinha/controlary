@@ -46,7 +46,7 @@ class HistoryView(QWidget):
         self.tabs.addTab(
             self._build_chart_tab(comprometimento_renda.plot), "Comprometimento %"
         )
-        self.tabs.addTab(self._build_chart_tab(monthly_expenses.plot), "Gastos por mês")
+        self.tabs.addTab(self._build_chart_tab(monthly_expenses.plot), "Custo de vida")
         self.tabs.addTab(self._build_chart_tab(invoice_evolution.plot), "Evolução da fatura")
         self.tabs.addTab(self._build_chart_tab(category_breakdown.plot), "Categorias")
         self.tabs.addTab(self._build_chart_tab(debt_evolution.plot), "Saldo devedor")

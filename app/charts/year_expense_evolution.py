@@ -54,7 +54,11 @@ def plot(ax) -> None:
     annotate_line_points(ax, x, valores, fontsize=6, dy=4, skip_zero=False, clip_on=False)
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
-    ax.set_title(f"Despesas no ano {year} (por mês)")
+    ax.set_title(
+        f"Custo de vida no ano {year}\n(soma dos lançamentos por mês — cartão e conta)",
+        fontsize=10,
+        pad=10,
+    )
     ax.set_ylabel("R$")
     ax.set_xlim(-0.35, 11.35)
 

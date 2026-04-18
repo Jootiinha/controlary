@@ -173,6 +173,7 @@ class MainWindow(QMainWindow):
             self.subscriptions.reload()
             self.fixed_expenses.reload()
             self.card_invoices.reload()
+            self.income_sources.reload()
 
         for view in (
             self.income_sources,

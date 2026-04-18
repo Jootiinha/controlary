@@ -3,19 +3,33 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
+    QDateEdit,
     QDoubleSpinBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QSizePolicy,
     QSpinBox,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from app.models.subscription import Subscription
-from app.services import accounts_service, cards_service, subscriptions_service
+from app.services import (
+    accounts_service,
+    cards_service,
+    subscription_months_service,
+    subscriptions_service,
+)
 from app.ui.categories_view import CategoryDialog
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.category_picker import CategoryPicker
@@ -207,7 +221,7 @@ class SubscriptionDialog(FormDialog):
         )
 
 
-class SubscriptionsView(CrudPage):
+class _SubscriptionsCrud(CrudPage):
     data_changed = Signal()
 
     def __init__(self) -> None:
@@ -305,3 +319,109 @@ class SubscriptionsView(CrudPage):
             subscriptions_service.delete(sid)
             self.reload()
             self.data_changed.emit()
+
+
+class _SubscriptionMonthlyControl(QWidget):
+    """Marca assinaturas em conta como pagas na competência (livro-caixa)."""
+    data_changed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        hint = QLabel(
+            "Assinaturas ativas debitadas em conta corrente. "
+            "Marque como Pago quando o débito ocorrer no mês selecionado."
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("PageSubtitle")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Competência:"))
+        self.dt = QDateEdit()
+        self.dt.setDisplayFormat("MM/yyyy")
+        self.dt.setCalendarPopup(True)
+        self.dt.setDate(QDate.currentDate())
+        self.dt.dateChanged.connect(self.reload_table)
+        row.addWidget(self.dt)
+        row.addStretch()
+        self.tbl = QTableWidget(0, 4)
+        self.tbl.setHorizontalHeaderLabels(
+            ["Nome", "Valor", "Conta", "Situação no mês"]
+        )
+        self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tbl.setSelectionMode(QAbstractItemView.NoSelection)
+        self.tbl.verticalHeader().setVisible(False)
+        lay = QVBoxLayout(self)
+        lay.addWidget(hint)
+        lay.addLayout(row)
+        lay.addWidget(self.tbl, 1)
+        self.reload_table()
+
+    def ano_mes(self) -> str:
+        d = self.dt.date()
+        return f"{d.year():04d}-{d.month():02d}"
+
+    def reload_table(self) -> None:
+        ym = self.ano_mes()
+        items = [
+            s
+            for s in subscriptions_service.list_all()
+            if s.status == "ativa" and s.account_id is not None and s.id is not None
+        ]
+        self.tbl.setRowCount(len(items))
+        align_left = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+        align_val = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
+        for i, s in enumerate(items):
+            assert s.id is not None
+            sid = s.id
+            it_n = QTableWidgetItem(s.nome)
+            it_n.setTextAlignment(align_left)
+            self.tbl.setItem(i, 0, it_n)
+            it_v = QTableWidgetItem(format_currency(s.valor_mensal))
+            it_v.setTextAlignment(align_val)
+            self.tbl.setItem(i, 1, it_v)
+            acc = accounts_service.get(int(s.account_id))
+            it_c = QTableWidgetItem(acc.nome if acc else "—")
+            it_c.setTextAlignment(align_left)
+            self.tbl.setItem(i, 2, it_c)
+            cb = QComboBox()
+            cb.addItems(["Pendente", "Pago"])
+            pago = subscription_months_service.is_paid(sid, ym)
+            cb.blockSignals(True)
+            cb.setCurrentIndex(1 if pago else 0)
+            cb.blockSignals(False)
+            cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+            def make_handler(sub_id: int, combo: QComboBox, competencia: str):
+                def on_change(_idx: int) -> None:
+                    want = combo.currentIndex() == 1
+                    subscription_months_service.set_month_status(
+                        sub_id, competencia, pago=want
+                    )
+                    self.data_changed.emit()
+
+                return on_change
+
+            cb.currentIndexChanged.connect(make_handler(sid, cb, ym))
+            self.tbl.setCellWidget(i, 3, cb)
+
+
+class SubscriptionsView(QWidget):
+    """Cadastro + situação mensal (conta)."""
+
+    data_changed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._crud = _SubscriptionsCrud()
+        self._month = _SubscriptionMonthlyControl()
+        self._crud.data_changed.connect(self.data_changed.emit)
+        self._month.data_changed.connect(self.data_changed.emit)
+        tabs = QTabWidget()
+        tabs.addTab(self._crud, "Cadastro")
+        tabs.addTab(self._month, "Situação mensal")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(tabs)
+
+    def reload(self) -> None:
+        self._crud.reload()
+        self._month.reload_table()

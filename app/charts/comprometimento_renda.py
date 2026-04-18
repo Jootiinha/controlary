@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+from matplotlib.patches import Rectangle
 from matplotlib.ticker import FuncFormatter
 
 from app.charts.plot_labels import annotate_bars
@@ -33,3 +34,10 @@ def plot(ax) -> None:
     ax.set_title("Comprometimento: gastos / renda mensal")
     ax.set_ylim(0, max(pct + [5]) * 1.1)
     ax.grid(True, axis="y", alpha=0.25)
+
+    def _hover_format(artist, target, index):
+        if isinstance(artist, Rectangle):
+            return f"{artist.get_height():.1f}%"
+        return ""
+
+    ax._hover_format = _hover_format

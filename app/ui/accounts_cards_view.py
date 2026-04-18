@@ -3,24 +3,66 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QDate, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QDateEdit,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QPushButton,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
-
 from app.models.account import Account
 from app.models.card import Card
 from app.services import accounts_service, cards_service
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
+from app.utils.formatting import format_currency
+
+
+class BalanceAdjustDialog(QDialog):
+    """Ajuste manual no livro-caixa (delta em R$ e data)."""
+
+    def __init__(self, parent=None, nome_conta: str = "") -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Ajustar saldo")
+        self.ed_delta = QDoubleSpinBox()
+        self.ed_delta.setRange(-10_000_000.0, 10_000_000.0)
+        self.ed_delta.setDecimals(2)
+        self.ed_delta.setPrefix("R$ ")
+        self.ed_data = QDateEdit()
+        self.ed_data.setDisplayFormat("dd/MM/yyyy")
+        self.ed_data.setCalendarPopup(True)
+        self.ed_data.setDate(QDate.currentDate())
+        form = QFormLayout()
+        if nome_conta:
+            form.addRow("Conta", QLabel(nome_conta))
+        form.addRow("Valor do ajuste (+ ou −) *", self.ed_delta)
+        form.addRow("Data *", self.ed_data)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(btns)
+
+    def data_iso(self) -> str:
+        return self.ed_data.date().toString("yyyy-MM-dd")
+
+    def delta(self) -> float:
+        return float(self.ed_delta.value())
 
 
 class AccountDialog(FormDialog):
@@ -34,12 +76,19 @@ class AccountDialog(FormDialog):
         self.ed_obs = QPlainTextEdit()
         self.ed_obs.setFixedHeight(64)
 
+        self.ed_saldo_ini = QDoubleSpinBox()
+        self.ed_saldo_ini.setRange(-10_000_000.0, 10_000_000.0)
+        self.ed_saldo_ini.setDecimals(2)
+        self.ed_saldo_ini.setPrefix("R$ ")
+
         self.form.addRow("Nome *", self.ed_nome)
+        self.form.addRow("Saldo inicial", self.ed_saldo_ini)
         self.form.addRow("Observação", self.ed_obs)
 
         if acc:
             self.ed_nome.setText(acc.nome)
             self.ed_obs.setPlainText(acc.observacao or "")
+            self.ed_saldo_ini.setValue(float(acc.saldo_inicial))
 
     def validate(self) -> tuple[bool, str | None]:
         if not self.ed_nome.text().strip():
@@ -51,6 +100,7 @@ class AccountDialog(FormDialog):
             id=self._acc.id if self._acc else None,
             nome=self.ed_nome.text().strip(),
             observacao=self.ed_obs.toPlainText().strip() or None,
+            saldo_inicial=float(self.ed_saldo_ini.value()),
         )
 
 
@@ -116,9 +166,22 @@ class _AccountsCrud(CrudPage):
     def __init__(self) -> None:
         super().__init__(
             "Contas bancárias",
-            "Cadastre contas para usar nos pagamentos e assinaturas.",
-            ["Nome", "Observação"],
+            "Cadastre contas para usar nos pagamentos e assinaturas. "
+            "Saldo atual = saldo inicial + movimentações até hoje.",
+            ["Nome", "Saldo inicial", "Saldo atual", "Observação"],
         )
+        self.btn_adjust = QPushButton("Ajustar saldo…")
+        self.btn_adjust.setToolTip(
+            "Registra um ajuste manual no livro-caixa (ex.: conciliação com extrato)."
+        )
+        self.btn_adjust.clicked.connect(self._adjust_balance)
+        adj_row = QWidget()
+        adj_lay = QHBoxLayout(adj_row)
+        adj_lay.setContentsMargins(0, 0, 0, 0)
+        adj_lay.addWidget(self.btn_adjust)
+        adj_lay.addStretch()
+        self.layout().insertWidget(2, adj_row)
+
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
         self.btn_delete.clicked.connect(self._delete)
@@ -127,8 +190,41 @@ class _AccountsCrud(CrudPage):
     def reload(self) -> None:
         rows = []
         for a in accounts_service.list_all():
-            rows.append((a.id or 0, [a.nome, a.observacao or ""]))
+            sa = a.saldo_atual
+            rows.append((
+                a.id or 0,
+                [
+                    a.nome,
+                    format_currency(float(a.saldo_inicial)),
+                    format_currency(float(sa)) if sa is not None else "—",
+                    a.observacao or "",
+                ],
+            ))
         self.model.set_rows(rows)
+
+    def _adjust_balance(self) -> None:
+        aid = self.selected_id()
+        if aid is None:
+            QMessageBox.information(self, "Ajustar saldo", "Selecione uma conta.")
+            return
+        acc = accounts_service.get(aid)
+        if acc is None:
+            return
+        dlg = BalanceAdjustDialog(self, nome_conta=acc.nome)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        d = dlg.delta()
+        if abs(d) < 0.005:
+            QMessageBox.information(self, "Ajustar saldo", "Informe um valor diferente de zero.")
+            return
+        accounts_service.post_adjustment(
+            aid,
+            d,
+            dlg.data_iso(),
+            descricao="Ajuste manual",
+        )
+        self.reload()
+        self.data_changed.emit()
 
     def _add(self) -> None:
         dlg = AccountDialog(self)

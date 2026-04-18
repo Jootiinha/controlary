@@ -451,7 +451,7 @@ class _MonthlyControl(QWidget):
                             return
                         mp = dlg.mirror_payment()
                         if mp is not None:
-                            payments_service.create(mp)
+                            payments_service.create(mp, record_ledger=False)
                         fixed_expenses_service.set_month_status(
                             f_id, competencia, pago=True
                         )

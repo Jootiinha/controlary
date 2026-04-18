@@ -1,8 +1,22 @@
 CREATE TABLE IF NOT EXISTS accounts (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome        TEXT    NOT NULL COLLATE NOCASE UNIQUE,
-    observacao  TEXT
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome           TEXT    NOT NULL COLLATE NOCASE UNIQUE,
+    observacao     TEXT,
+    saldo_inicial  REAL    NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS account_transactions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id       INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    data             TEXT    NOT NULL,
+    valor            REAL    NOT NULL,
+    origem           TEXT    NOT NULL,
+    transaction_key  TEXT    NOT NULL UNIQUE,
+    descricao        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_transactions_account_data
+    ON account_transactions(account_id, data);
 
 CREATE TABLE IF NOT EXISTS categories (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +61,7 @@ CREATE TABLE IF NOT EXISTS installments (
     nome_fatura     TEXT    NOT NULL,
     cartao          TEXT,
     cartao_id       INTEGER REFERENCES cards(id),
+    account_id      INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
     mes_referencia  TEXT    NOT NULL,
     valor_parcela   REAL    NOT NULL,
     total_parcelas  INTEGER NOT NULL,
@@ -57,11 +72,23 @@ CREATE TABLE IF NOT EXISTS installments (
     CHECK (total_parcelas > 0),
     CHECK (parcelas_pagas >= 0),
     CHECK (parcelas_pagas <= total_parcelas),
-    CHECK (status IN ('ativo', 'quitado'))
+    CHECK (status IN ('ativo', 'quitado')),
+    CHECK (NOT (cartao_id IS NOT NULL AND account_id IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_installments_status ON installments(status);
 CREATE INDEX IF NOT EXISTS idx_installments_mes ON installments(mes_referencia);
+
+CREATE TABLE IF NOT EXISTS installment_months (
+    installment_id INTEGER NOT NULL REFERENCES installments(id) ON DELETE CASCADE,
+    ano_mes        TEXT    NOT NULL,
+    status         TEXT    NOT NULL DEFAULT 'pendente',
+    paid_at        TEXT,
+    PRIMARY KEY (installment_id, ano_mes),
+    CHECK (status IN ('pendente', 'pago'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_installment_months_mes ON installment_months(ano_mes);
 
 CREATE TABLE IF NOT EXISTS subscriptions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,6 +109,17 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
+
+CREATE TABLE IF NOT EXISTS subscription_months (
+    subscription_id INTEGER NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+    ano_mes         TEXT    NOT NULL,
+    status          TEXT    NOT NULL DEFAULT 'pendente',
+    paid_at         TEXT,
+    PRIMARY KEY (subscription_id, ano_mes),
+    CHECK (status IN ('pendente', 'pago'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_months_mes ON subscription_months(ano_mes);
 
 CREATE TABLE IF NOT EXISTS fixed_expenses (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,12 +151,24 @@ CREATE TABLE IF NOT EXISTS income_sources (
     valor_mensal    REAL    NOT NULL,
     ativo           INTEGER NOT NULL DEFAULT 1,
     dia_recebimento INTEGER NOT NULL DEFAULT 5,
+    account_id      INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
     observacao      TEXT,
     CHECK (valor_mensal >= 0),
     CHECK (dia_recebimento BETWEEN 1 AND 31)
 );
 
 CREATE INDEX IF NOT EXISTS idx_income_sources_ativo ON income_sources(ativo);
+
+CREATE TABLE IF NOT EXISTS income_months (
+    income_source_id INTEGER NOT NULL REFERENCES income_sources(id) ON DELETE CASCADE,
+    ano_mes          TEXT    NOT NULL,
+    status           TEXT    NOT NULL DEFAULT 'pendente',
+    recebido_em      TEXT,
+    PRIMARY KEY (income_source_id, ano_mes),
+    CHECK (status IN ('pendente', 'recebido'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_income_months_mes ON income_months(ano_mes);
 
 CREATE TABLE IF NOT EXISTS card_invoices (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
