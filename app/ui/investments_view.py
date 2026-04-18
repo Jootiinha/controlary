@@ -324,14 +324,10 @@ class _InvestEvo(QWidget):
         self._kp_var = KpiCard(
             "Variação total da carteira (%)", "—", compact=True, compact_style="tall_narrow"
         )
-        _w = 128
-        for kp in (self._kp_ganho, self._kp_var):
-            kp.setFixedWidth(_w)
         row_kpi = QHBoxLayout()
         row_kpi.setSpacing(10)
-        row_kpi.addWidget(self._kp_ganho, 0)
-        row_kpi.addWidget(self._kp_var, 0)
-        row_kpi.addStretch(1)
+        row_kpi.addWidget(self._kp_ganho, 1)
+        row_kpi.addWidget(self._kp_var, 1)
 
         self._canvas_pat = ChartCanvas(
             investment_evolution_overview.plot_patrimonio_total(),

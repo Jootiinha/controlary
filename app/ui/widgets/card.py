@@ -107,7 +107,7 @@ class KpiCard(QFrame):
             self.setFixedHeight(128)
             self.setMinimumWidth(112)
             self.setSizePolicy(
-                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
             self._title.setMinimumHeight(44)
             self._title.setMaximumHeight(56)
