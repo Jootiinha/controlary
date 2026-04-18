@@ -1,37 +1,34 @@
 """Cadastro de investimentos e evolução por snapshots."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional
 
 from PySide6.QtCore import QDate, Signal
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QComboBox,
     QDateEdit,
     QDoubleSpinBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QInputDialog,
     QPlainTextEdit,
     QPushButton,
-    QSizePolicy,
-    QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
-    QAbstractItemView,
 )
 
+from app.charts import investment_evolution_overview
 from app.models.investment import Investment
 from app.services import accounts_service, investments_service
 from app.ui.categories_view import CategoryDialog
 from app.ui.widgets.category_picker import CategoryPicker
-from app.ui.widgets.chart_canvas import ChartCanvas
 from app.ui.widgets.card import KpiCard
-from app.charts import investment_evolution
+from app.ui.widgets.chart_canvas import ChartCanvas
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
 from app.utils.formatting import format_currency, format_date_br
@@ -41,20 +38,22 @@ TIPOS = [
 ]
 
 
-def _format_pct_br(value: float, suffix: str) -> str:
-    s = f"{value:.2f}".replace(".", ",")
-    return f"{s}{suffix}"
+def _fmt_pct_carteira(pct: float | None) -> str:
+    if pct is None:
+        return "—"
+    s = f"{pct:.2f}".replace(".", ",")
+    return f"{s} %"
 
 
-def _kpi_value_style(card: KpiCard, gain: float | None) -> None:
-    if gain is None:
+def _kpi_carteira_style(card: KpiCard, signed: float | None) -> None:
+    if signed is None:
         card.setStyleSheet("")
         return
-    if gain > 0:
+    if signed > 0:
         card.setStyleSheet(
             "QFrame#KpiCardCompact QLabel#KpiValue { color: #15803d; }"
         )
-    elif gain < 0:
+    elif signed < 0:
         card.setStyleSheet(
             "QFrame#KpiCardCompact QLabel#KpiValue { color: #B91C1C; }"
         )
@@ -87,6 +86,11 @@ class InvestmentDialog(FormDialog):
         self.sp_rend.setSuffix(" % a.a.")
         self.sp_rend.setSpecialValueText("—")
         self.sp_rend.setValue(0.0)
+        self.sp_rend.setReadOnly(True)
+        self.sp_rend.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.sp_rend.setToolTip(
+            "Calculado automaticamente a partir dos registros de evolução (snapshots)."
+        )
 
         self.dt_ini = QDateEdit()
         self.dt_ini.setDisplayFormat("dd/MM/yyyy")
@@ -216,6 +220,12 @@ class _InvestCrud(CrudPage):
             "Aplicações vinculadas a contas cadastradas.",
             ["Banco", "Nome", "Tipo", "Aplicado", "Categoria", "Início"],
         )
+        self.btn_registrar_hoje = QPushButton("Registrar valor hoje")
+        self.btn_registrar_hoje.setObjectName("PrimaryButton")
+        self.btn_registrar_hoje.clicked.connect(self._registrar_valor_hoje)
+        idx = self.toolbar_layout.indexOf(self.btn_delete)
+        self.toolbar_layout.insertWidget(idx + 1, self.btn_registrar_hoje)
+
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
         self.btn_delete.clicked.connect(self._delete)
@@ -261,151 +271,16 @@ class _InvestCrud(CrudPage):
             self.reload()
             self.data_changed.emit()
 
-    def _delete(self) -> None:
+    def _registrar_valor_hoje(self) -> None:
         iid = self.selected_id()
         if iid is None:
-            return
-        if QMessageBox.question(self, "Excluir", "Excluir este investimento?") != QMessageBox.Yes:
-            return
-        investments_service.delete(iid)
-        self.reload()
-        self.data_changed.emit()
-
-
-class _InvestEvo(QWidget):
-    data_changed = Signal()
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._inv_id: int | None = None
-
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Investimento:"))
-        self.cmb = QComboBox()
-        self.cmb.currentIndexChanged.connect(self._on_inv_change)
-        row.addWidget(self.cmb, 1)
-        self.btn_atual = QPushButton("Registrar valor hoje")
-        self.btn_atual.setObjectName("PrimaryButton")
-        self.btn_atual.clicked.connect(self._snapshot_hoje)
-        row.addWidget(self.btn_atual)
-
-        self._kp_gain_pct = KpiCard("Ganho médio (%)", "—", compact=True)
-        self._kp_gain_rs = KpiCard("Ganho (R$)", "—", compact=True)
-        _evo_kpi_w = 152
-        for kp in (self._kp_gain_pct, self._kp_gain_rs):
-            kp.setFixedWidth(_evo_kpi_w)
-            kp.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        row_kpi = QHBoxLayout()
-        row_kpi.setSpacing(10)
-        row_kpi.addWidget(self._kp_gain_pct, 0)
-        row_kpi.addWidget(self._kp_gain_rs, 0)
-        row_kpi.addStretch(1)
-
-        self.tbl = QTableWidget(0, 2)
-        self.tbl.setHorizontalHeaderLabels(["Data", "Valor"])
-        self.tbl.verticalHeader().setVisible(False)
-        self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-
-        self._canvas = ChartCanvas(width=7.0, height=3.0, dpi=100)
-
-        lay = QVBoxLayout(self)
-        lay.addLayout(row)
-        lay.addLayout(row_kpi)
-        lay.addWidget(self.tbl)
-        lay.addWidget(self._canvas, 1)
-        self._reload_combo()
-
-    def _reload_combo(self) -> None:
-        self.cmb.blockSignals(True)
-        self.cmb.clear()
-        for x in investments_service.list_all():
-            if x.id is not None:
-                self.cmb.addItem(f"{x.nome} ({x.banco_nome})", x.id)
-        self.cmb.blockSignals(False)
-        if self.cmb.count() > 0:
-            self.cmb.setCurrentIndex(0)
-            self._on_inv_change()
-        else:
-            self._inv_id = None
-            self._clear_gain_kpis()
-            self.tbl.setRowCount(0)
-            self._canvas.set_renderer(None)
-            self._canvas.refresh()
-
-    def _clear_gain_kpis(self) -> None:
-        self._kp_gain_pct.set_value("—")
-        self._kp_gain_rs.set_value("—")
-        self._kp_gain_pct.set_subtitle("")
-        _kpi_value_style(self._kp_gain_pct, None)
-        _kpi_value_style(self._kp_gain_rs, None)
-
-    def _on_inv_change(self) -> None:
-        iid = self.cmb.currentData()
-        if iid is None:
-            self._inv_id = None
-            self._clear_gain_kpis()
-            self.tbl.setRowCount(0)
-            self._canvas.set_renderer(None)
-            self._canvas.refresh()
-            return
-        self._inv_id = int(iid)
-        self._refresh_table()
-        self._canvas.set_renderer(
-            investment_evolution.plot_for_investment(self._inv_id)
-        )
-        self._canvas.refresh()
-
-    def _refresh_table(self) -> None:
-        if self._inv_id is None:
-            self.tbl.setRowCount(0)
-            self._clear_gain_kpis()
-            return
-        inv = investments_service.get(self._inv_id)
-        if inv is None:
-            self.tbl.setRowCount(0)
-            self._clear_gain_kpis()
-            return
-        series = investments_service.evolution_series(self._inv_id)
-        self.tbl.setRowCount(len(series))
-        for i, (d, val) in enumerate(series):
-            self.tbl.setItem(i, 0, QTableWidgetItem(format_date_br(d)))
-            self.tbl.setItem(i, 1, QTableWidgetItem(format_currency(val)))
-        last_v, gain = investments_service.last_value_and_gain(self._inv_id)
-        has_snapshots = len(investments_service.list_snapshots(self._inv_id)) > 0
-        self._kp_gain_rs.set_value(format_currency(gain))
-        _kpi_value_style(self._kp_gain_rs, gain)
-
-        if not has_snapshots:
-            self._kp_gain_pct.set_value("—")
-            self._kp_gain_pct.set_subtitle("")
-            _kpi_value_style(self._kp_gain_pct, None)
-            return
-
-        if inv.rendimento_percentual_aa is not None:
-            self._kp_gain_pct.set_value(
-                _format_pct_br(inv.rendimento_percentual_aa, " % a.a.")
+            QMessageBox.information(
+                self, "Investimentos", "Selecione um investimento na tabela."
             )
-            self._kp_gain_pct.set_subtitle("")
-            _kpi_value_style(self._kp_gain_pct, inv.rendimento_percentual_aa)
-        elif inv.valor_aplicado > 0:
-            total_pct = (last_v / float(inv.valor_aplicado) - 1.0) * 100.0
-            self._kp_gain_pct.set_value(_format_pct_br(total_pct, " %"))
-            self._kp_gain_pct.set_subtitle("Variação no período")
-            _kpi_value_style(self._kp_gain_pct, total_pct)
-        else:
-            self._kp_gain_pct.set_value("—")
-            self._kp_gain_pct.set_subtitle("")
-            _kpi_value_style(self._kp_gain_pct, None)
-
-    def _snapshot_hoje(self) -> None:
-        if self._inv_id is None:
             return
-        inv = investments_service.get(self._inv_id)
+        inv = investments_service.get(iid)
         if inv is None:
             return
-        from datetime import date
-
         d = date.today().isoformat()
         val, ok = QInputDialog.getDouble(
             self,
@@ -418,13 +293,93 @@ class _InvestEvo(QWidget):
         )
         if not ok:
             return
-        investments_service.add_snapshot(self._inv_id, d, float(val))
-        self._refresh_table()
-        self._canvas.refresh()
+        investments_service.add_snapshot(iid, d, float(val))
+        self.reload()
         self.data_changed.emit()
 
+    def _delete(self) -> None:
+        iid = self.selected_id()
+        if iid is None:
+            return
+        if QMessageBox.question(self, "Excluir", "Excluir este investimento?") != QMessageBox.Yes:
+            return
+        investments_service.delete(iid)
+        self.reload()
+        self.data_changed.emit()
+
+
+class _InvestEvo(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        lbl = QLabel(
+            "Visão consolidada de todos os investimentos ativos. "
+            "O patrimônio soma o valor de cada aplicação nas datas registradas."
+        )
+        lbl.setObjectName("PageSubtitle")
+        lbl.setWordWrap(True)
+
+        self._kp_ganho = KpiCard(
+            "Ganho total da carteira (R$)", "—", compact=True, compact_style="tall_narrow"
+        )
+        self._kp_var = KpiCard(
+            "Variação total da carteira (%)", "—", compact=True, compact_style="tall_narrow"
+        )
+        _w = 128
+        for kp in (self._kp_ganho, self._kp_var):
+            kp.setFixedWidth(_w)
+        row_kpi = QHBoxLayout()
+        row_kpi.setSpacing(10)
+        row_kpi.addWidget(self._kp_ganho, 0)
+        row_kpi.addWidget(self._kp_var, 0)
+        row_kpi.addStretch(1)
+
+        self._canvas_pat = ChartCanvas(
+            investment_evolution_overview.plot_patrimonio_total(),
+            width=7.0,
+            height=3.2,
+            dpi=100,
+        )
+        self._canvas_inv = ChartCanvas(
+            investment_evolution_overview.plot_todos_investimentos(),
+            width=7.0,
+            height=3.2,
+            dpi=100,
+        )
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 24, 24, 24)
+        lay.setSpacing(14)
+        lay.addWidget(lbl)
+        lay.addLayout(row_kpi)
+        lay.addWidget(self._canvas_pat, 1)
+        lay.addWidget(self._canvas_inv, 1)
+        self._refresh_kpis()
+
+    def _refresh_kpis(self) -> None:
+        invs = investments_service.list_all()
+        if not invs:
+            self._kp_ganho.set_value("—")
+            self._kp_var.set_value("—")
+            _kpi_carteira_style(self._kp_ganho, None)
+            _kpi_carteira_style(self._kp_var, None)
+            return
+        ganho, pct = investments_service.portfolio_carteira_gain_metrics()
+        self._kp_ganho.set_value(format_currency(ganho))
+        _kpi_carteira_style(self._kp_ganho, ganho)
+        if pct is None:
+            self._kp_var.set_value("—")
+            _kpi_carteira_style(self._kp_var, None)
+        else:
+            self._kp_var.set_value(_fmt_pct_carteira(pct))
+            _kpi_carteira_style(self._kp_var, pct)
+
     def reload_all(self) -> None:
-        self._reload_combo()
+        self._refresh_kpis()
+        self._canvas_pat.set_renderer(investment_evolution_overview.plot_patrimonio_total())
+        self._canvas_pat.refresh()
+        self._canvas_inv.set_renderer(
+            investment_evolution_overview.plot_todos_investimentos()
+        )
+        self._canvas_inv.refresh()
 
 
 class InvestmentsView(QWidget):
@@ -436,7 +391,6 @@ class InvestmentsView(QWidget):
         self._evo = _InvestEvo()
         self._crud.data_changed.connect(self.data_changed.emit)
         self._crud.data_changed.connect(self._evo.reload_all)
-        self._evo.data_changed.connect(self.data_changed.emit)
 
         tabs = QTabWidget()
         tabs.addTab(self._crud, "Cadastro")

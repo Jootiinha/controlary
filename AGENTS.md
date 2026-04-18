@@ -14,6 +14,7 @@ Use o Makefile sempre que possível:
 make install     # poetry install --no-root
 make run         # roda o app (poetry run python main.py)
 make check       # valida pyproject e compila todos os .py
+make test        # roda pytest (grupo dev: pytest, pytest-qt)
 make reset-db    # apaga ~/.controle-financeiro/app.db
 make build-mac   # empacota .app
 make build-win   # empacota .exe
@@ -26,7 +27,7 @@ poetry install && poetry run python main.py
 poetry run python -m compileall -q app main.py
 ```
 
-Não existe suíte de testes ainda. `make check` é a validação mínima antes de concluir qualquer tarefa que toque em `.py`.
+Testes automatizados: `make test` (BD SQLite temporária via `CONTROLE_FINANCEIRO_DB`). `make check` continua sendo a validação mínima de sintaxe antes de concluir tarefas que toquem em `.py`.
 
 ## Arquitetura em camadas
 
@@ -107,7 +108,7 @@ def _migrate_cards_dia_pagamento_fatura(conn) -> None:
 
 ## Fora de escopo por padrão
 
-- Criar testes automatizados (não existe infraestrutura ainda; peça antes).
+- Expandir a suíte de testes além do fluxo da dashboard sem pedido explícito.
 - Mudar stack (Qt → Tkinter/Electron; SQLite → Postgres).
 - Introduzir rede externa; o app é intencionalmente offline.
 - Alterar a licença ou o conteúdo de `LICENSE`.

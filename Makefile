@@ -1,4 +1,4 @@
-.PHONY: help install install-all run icon build-mac build-win clean reset-db check
+.PHONY: help install install-all run icon build-mac build-win clean reset-db check test
 
 ifeq ($(OS),Windows_NT)
   PYTHON ?= py -3
@@ -21,6 +21,7 @@ help:
 	@echo "  make build-mac   Empacota o app para macOS (.app em dist/)"
 	@echo "  make build-win   Empacota o app para Windows (.exe em dist/)"
 	@echo "  make check       Valida pyproject.toml e compila os .py"
+	@echo "  make test        Roda a suíte pytest (instala deps com dev se necessário)"
 	@echo "  make reset-db    Apaga o banco em ~/.controle-financeiro/app.db"
 	@echo "  make clean       Remove build/, dist/, caches e .pyc"
 	@echo ""
@@ -62,6 +63,10 @@ endif
 check:
 	$(POETRY) check
 	$(POETRY) run python -m compileall -q app main.py build/make_icon.py build/clean.py build/reset_db.py
+
+test: $(VENV_STAMP)
+	$(POETRY) install --with dev --no-root
+	$(POETRY) run pytest tests/
 
 reset-db:
 	$(POETRY) run python build/reset_db.py

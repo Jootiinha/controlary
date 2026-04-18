@@ -210,6 +210,7 @@ class MainWindow(QMainWindow):
                     Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
                 )
 
+        tree.expandAll()
         first_leaf = tree.topLevelItem(0).child(0)
         tree.setCurrentItem(first_leaf)
         tree.currentItemChanged.connect(self._on_tree_nav_changed)

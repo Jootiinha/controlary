@@ -1,6 +1,8 @@
 """Card de KPI usado no dashboard."""
 from __future__ import annotations
 
+from typing import Literal
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout
@@ -70,6 +72,7 @@ class KpiCard(QFrame):
         subtitle: str = "",
         *,
         compact: bool = False,
+        compact_style: Literal["default", "tall_narrow"] = "default",
     ) -> None:
         super().__init__()
         self.setObjectName("KpiCardCompact" if compact else "KpiCard")
@@ -100,7 +103,28 @@ class KpiCard(QFrame):
         layout.addWidget(self._value)
         layout.addWidget(self._subtitle)
 
-        if compact:
+        if compact and compact_style == "tall_narrow":
+            self.setFixedHeight(128)
+            self.setMinimumWidth(112)
+            self.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            self._title.setMinimumHeight(44)
+            self._title.setMaximumHeight(56)
+            self._title.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+            )
+            self._value.setFixedHeight(26)
+            if not (subtitle or "").strip():
+                self._subtitle.hide()
+                self._subtitle.setMaximumHeight(0)
+            else:
+                self._subtitle.setFixedHeight(28)
+            layout.setSpacing(5)
+            layout.setStretch(0, 0)
+            layout.setStretch(1, 0)
+            layout.setStretch(2, 0)
+        elif compact:
             self.setFixedHeight(_KPI_COMPACT_H)
             self.setMinimumWidth(_KPI_COMPACT_MIN_W)
             self.setSizePolicy(

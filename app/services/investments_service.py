@@ -35,6 +35,38 @@ def evolution_series(inv_id: int) -> list[tuple[str, float]]:
     return sorted(by_date.items(), key=lambda x: x[0])
 
 
+def _valor_em_data(series: list[tuple[str, float]], data_iso: str) -> float:
+    last = 0.0
+    for ds, val in series:
+        if ds <= data_iso:
+            last = float(val)
+        else:
+            break
+    return last
+
+
+def portfolio_patrimonio_series() -> list[tuple[str, float]]:
+    invs = list_all()
+    all_dates: set[str] = set()
+    series_by_id: dict[int, list[tuple[str, float]]] = {}
+    for inv in invs:
+        if inv.id is None:
+            continue
+        ser = evolution_series(inv.id)
+        series_by_id[inv.id] = ser
+        for d, _ in ser:
+            all_dates.add(d)
+    if not all_dates:
+        return []
+    out: list[tuple[str, float]] = []
+    for d in sorted(all_dates):
+        total = 0.0
+        for ser in series_by_id.values():
+            total += _valor_em_data(ser, d)
+        out.append((d, total))
+    return out
+
+
 def last_value_and_gain(inv_id: int) -> tuple[float, float]:
     inv = get(inv_id)
     if inv is None:
@@ -45,6 +77,24 @@ def last_value_and_gain(inv_id: int) -> tuple[float, float]:
         return (va, 0.0)
     last_v = series[-1][1]
     return (last_v, last_v - va)
+
+
+def portfolio_carteira_gain_metrics() -> tuple[float, Optional[float]]:
+    """Ganho agregado em R$ e variação % sobre o total aplicado (carteira ativa)."""
+    invs = list_all()
+    total_aplicado = 0.0
+    patrimonio = 0.0
+    for inv in invs:
+        if inv.id is None:
+            continue
+        total_aplicado += float(inv.valor_aplicado)
+        last_v, _ = last_value_and_gain(inv.id)
+        patrimonio += last_v
+    ganho = patrimonio - total_aplicado
+    if total_aplicado <= 0:
+        return (ganho, None)
+    pct = (patrimonio / total_aplicado - 1.0) * 100.0
+    return (ganho, pct)
 
 
 def _parse_iso(d: str) -> date:

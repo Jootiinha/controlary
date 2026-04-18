@@ -21,6 +21,15 @@ optional = true
 [tool.poetry.group.build.dependencies]
 pyinstaller = "^6.3"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0"
+pytest-qt = "^4.4"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+qt_api = "pyside6"
+
 [build-system]
 requires = ["poetry-core>=2.0"]
 build-backend = "poetry.core.masonry.api"
