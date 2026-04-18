@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from app.models.subscription import Subscription
 from app.services import accounts_service, cards_service, subscriptions_service
 from app.ui.categories_view import CategoryDialog
+from app.ui.widgets.card import KpiCard
 from app.ui.widgets.category_picker import CategoryPicker
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
@@ -215,15 +216,36 @@ class SubscriptionsView(CrudPage):
             "Gerencie assinaturas recorrentes e o custo mensal total.",
             ["Nome", "Categoria", "Valor", "Dia", "Forma", "Conta/Cartão", "Status"],
         )
+        self._by_id: dict[int, Subscription] = {}
+        self.totals_wrap.setVisible(True)
+        self._kp_mensal = KpiCard("Total mensal (ativas)", "-", compact=True)
+        self._kp_ativas = KpiCard("Ativas", "-", compact=True)
+        self._kp_outras = KpiCard("Pausadas / canceladas", "-", compact=True)
+        self.totals_bar.addWidget(self._kp_mensal)
+        self.totals_bar.addWidget(self._kp_ativas)
+        self.totals_bar.addWidget(self._kp_outras)
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
         self.btn_delete.clicked.connect(self._delete)
         self.btn_refresh.clicked.connect(self.reload)
         self.reload()
 
+    def _refresh_kpi_cards(self) -> None:
+        total_ativas = sum(
+            s.valor_mensal for s in self._by_id.values() if s.status == "ativa"
+        )
+        n_ativas = sum(1 for s in self._by_id.values() if s.status == "ativa")
+        n_out = len(self._by_id) - n_ativas
+        self._kp_mensal.set_value(format_currency(total_ativas))
+        self._kp_ativas.set_value(str(n_ativas))
+        self._kp_outras.set_value(str(n_out))
+
     def reload(self) -> None:
+        self._by_id.clear()
         rows = []
         for s in subscriptions_service.list_all():
+            if s.id is not None:
+                self._by_id[s.id] = s
             meio = s.meio_label or "—"
             cat = s.categoria_nome or s.categoria or ""
             rows.append((s.id or 0, [
@@ -236,6 +258,19 @@ class SubscriptionsView(CrudPage):
                 s.status.capitalize(),
             ]))
         self.model.set_rows(rows)
+        self._refresh_kpi_cards()
+        self.refresh_totals()
+
+    def compute_totals(self, visible_ids: list[int]) -> None:
+        if not self._by_id:
+            self.set_footer_text("", "")
+            return
+        vis = [self._by_id[i] for i in visible_ids if i in self._by_id]
+        total = sum(s.valor_mensal for s in vis)
+        self.set_footer_text(
+            f"Total mensal (visíveis): {format_currency(total)}",
+            f"Itens: {len(vis)}",
+        )
 
     def _add(self) -> None:
         dlg = SubscriptionDialog(self)

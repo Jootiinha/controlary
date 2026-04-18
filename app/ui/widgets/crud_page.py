@@ -1,14 +1,16 @@
-"""Página CRUD genérica: título, toolbar e tabela."""
+"""Página CRUD genérica: título, toolbar, busca, totais opcionais e tabela."""
 from __future__ import annotations
 
 from typing import List
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSizePolicy,
     QTableView,
@@ -61,6 +63,33 @@ class SimpleTableModel(QAbstractTableModel):
         return section + 1
 
 
+class _MultiColumnFilterProxyModel(QSortFilterProxyModel):
+    """Filtro por substring em qualquer coluna (case-insensitive)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._needle = ""
+
+    def set_filter_needle(self, text: str) -> None:
+        self._needle = text.strip().lower()
+        self.invalidateFilter()
+
+    def filterAcceptsRow(
+        self, source_row: int, source_parent: QModelIndex
+    ) -> bool:
+        if not self._needle:
+            return True
+        model = self.sourceModel()
+        if model is None:
+            return True
+        for c in range(model.columnCount(source_parent)):
+            idx = model.index(source_row, c, source_parent)
+            text = (model.data(idx, Qt.DisplayRole) or "").lower()
+            if self._needle in text:
+                return True
+        return False
+
+
 class CrudPage(QWidget):
     """Widget base com header e tabela. Subclasses implementam ações."""
 
@@ -79,10 +108,15 @@ class CrudPage(QWidget):
         self.btn_delete.setObjectName("DangerButton")
         self.btn_refresh = QPushButton("Atualizar")
 
+        self.ed_search = QLineEdit()
+        self.ed_search.setPlaceholderText("Buscar…")
+        self.ed_search.setClearButtonEnabled(True)
+
         toolbar = QHBoxLayout()
         toolbar.addWidget(self.btn_add)
         toolbar.addWidget(self.btn_edit)
         toolbar.addWidget(self.btn_delete)
+        toolbar.addWidget(self.ed_search)
         toolbar.addStretch()
         toolbar.addWidget(self.btn_refresh)
 
@@ -92,8 +126,11 @@ class CrudPage(QWidget):
         header_box.addWidget(lbl_subtitle)
 
         self.model = SimpleTableModel(headers)
+        self._proxy = _MultiColumnFilterProxyModel()
+        self._proxy.setSourceModel(self.model)
+
         self.table = QTableView()
-        self.table.setModel(self.model)
+        self.table.setModel(self._proxy)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setAlternatingRowColors(False)
@@ -107,15 +144,66 @@ class CrudPage(QWidget):
             QSizePolicy.Policy.Expanding,
         )
 
+        self.totals_wrap = QWidget()
+        self.totals_bar = QHBoxLayout(self.totals_wrap)
+        self.totals_bar.setContentsMargins(0, 0, 0, 0)
+        self.totals_wrap.setVisible(False)
+
+        self.footer_frame = QFrame()
+        self.footer_frame.setObjectName("CrudFooter")
+        footer_lay = QHBoxLayout(self.footer_frame)
+        footer_lay.setContentsMargins(8, 6, 8, 6)
+        self.lbl_footer_left = QLabel("")
+        self.lbl_footer_left.setObjectName("PageSubtitle")
+        self.lbl_footer_right = QLabel("")
+        self.lbl_footer_right.setObjectName("PageSubtitle")
+        footer_lay.addWidget(self.lbl_footer_left)
+        footer_lay.addStretch()
+        footer_lay.addWidget(self.lbl_footer_right)
+        self.footer_frame.setVisible(False)
+
+        self.ed_search.textChanged.connect(self._on_search_changed)
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 24, 24, 24)
         outer.setSpacing(14)
         outer.addLayout(header_box)
         outer.addLayout(toolbar)
+        outer.addWidget(self.totals_wrap)
         outer.addWidget(self.table, 1)
+        outer.addWidget(self.footer_frame)
+
+    def _on_search_changed(self, text: str) -> None:
+        self._proxy.set_filter_needle(text)
+        self.refresh_totals()
+
+    def visible_row_ids(self) -> list[int]:
+        ids: list[int] = []
+        for row in range(self._proxy.rowCount()):
+            src = self._proxy.mapToSource(self._proxy.index(row, 0))
+            if not src.isValid():
+                continue
+            rid = self.model.row_id(src.row())
+            if rid is not None:
+                ids.append(rid)
+        return ids
+
+    def refresh_totals(self) -> None:
+        self.compute_totals(self.visible_row_ids())
+
+    def compute_totals(self, visible_ids: list[int]) -> None:
+        pass
+
+    def set_footer_text(self, left: str, right: str = "") -> None:
+        self.lbl_footer_left.setText(left)
+        self.lbl_footer_right.setText(right)
+        self.footer_frame.setVisible(bool(left or right))
 
     def selected_id(self) -> int | None:
         idx = self.table.currentIndex()
         if not idx.isValid():
             return None
-        return self.model.row_id(idx.row())
+        src = self._proxy.mapToSource(idx)
+        if not src.isValid():
+            return None
+        return self.model.row_id(src.row())

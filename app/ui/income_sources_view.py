@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from app.models.income_source import IncomeSource
 from app.services import income_sources_service
+from app.ui.widgets.card import KpiCard
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
 from app.utils.formatting import format_currency
@@ -84,15 +85,35 @@ class IncomeSourcesView(CrudPage):
             "Cadastre uma ou mais fontes de renda mensal. A soma das ativas aparece no dashboard.",
             ["Nome", "Valor mensal", "Dia receb.", "Ativa", "Observação"],
         )
+        self._by_id: dict[int, IncomeSource] = {}
+        self.totals_wrap.setVisible(True)
+        self._kp_mensal = KpiCard("Total mensal (ativas)", "-", compact=True)
+        self._kp_ativas = KpiCard("Fontes ativas", "-", compact=True)
+        self._kp_cad = KpiCard("Fontes cadastradas", "-", compact=True)
+        self.totals_bar.addWidget(self._kp_mensal)
+        self.totals_bar.addWidget(self._kp_ativas)
+        self.totals_bar.addWidget(self._kp_cad)
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
         self.btn_delete.clicked.connect(self._delete)
         self.btn_refresh.clicked.connect(self.reload)
         self.reload()
 
+    def _refresh_kpi_cards(self) -> None:
+        total_ativas = sum(
+            s.valor_mensal for s in self._by_id.values() if s.ativo
+        )
+        n_ativas = sum(1 for s in self._by_id.values() if s.ativo)
+        self._kp_mensal.set_value(format_currency(total_ativas))
+        self._kp_ativas.set_value(str(n_ativas))
+        self._kp_cad.set_value(str(len(self._by_id)))
+
     def reload(self) -> None:
+        self._by_id.clear()
         rows = []
         for s in income_sources_service.list_all():
+            if s.id is not None:
+                self._by_id[s.id] = s
             obs = (s.observacao or "").replace("\n", " ")
             if len(obs) > 80:
                 obs = obs[:77] + "..."
@@ -104,6 +125,19 @@ class IncomeSourcesView(CrudPage):
                 obs or "—",
             ]))
         self.model.set_rows(rows)
+        self._refresh_kpi_cards()
+        self.refresh_totals()
+
+    def compute_totals(self, visible_ids: list[int]) -> None:
+        if not self._by_id:
+            self.set_footer_text("", "")
+            return
+        vis = [self._by_id[i] for i in visible_ids if i in self._by_id]
+        total = sum(s.valor_mensal for s in vis)
+        self.set_footer_text(
+            f"Total mensal (visíveis): {format_currency(total)}",
+            f"Itens: {len(vis)}",
+        )
 
     def _add(self) -> None:
         dlg = IncomeSourceDialog(self)

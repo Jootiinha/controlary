@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from app.models.fixed_expense import FixedExpense
 from app.services import accounts_service, fixed_expenses_service, payments_service
 from app.ui.categories_view import CategoryDialog
+from app.ui.widgets.card import KpiCard
 from app.ui.widgets.category_picker import CategoryPicker
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
@@ -149,14 +150,32 @@ class _FixedCrud(CrudPage):
             "Aluguel, contas de consumo, telefone etc. O valor entra no previsto até marcar como pago no mês.",
             ["Nome", "Valor/mês", "Dia", "Conta", "Categoria", "Forma", "Ativo"],
         )
+        self._by_id: dict[int, FixedExpense] = {}
+        self.totals_wrap.setVisible(True)
+        self._kp_mensal = KpiCard("Total mensal (ativos)", "-", compact=True)
+        self._kp_ativos = KpiCard("Ativos", "-", compact=True)
+        self._kp_cad = KpiCard("Cadastrados", "-", compact=True)
+        self.totals_bar.addWidget(self._kp_mensal)
+        self.totals_bar.addWidget(self._kp_ativos)
+        self.totals_bar.addWidget(self._kp_cad)
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
         self.btn_delete.clicked.connect(self._delete)
         self.btn_refresh.clicked.connect(self.reload)
 
+    def _refresh_kpi_cards(self) -> None:
+        ativos = [fe for fe in self._by_id.values() if fe.ativo]
+        total_m = sum(fe.valor_mensal for fe in ativos)
+        self._kp_mensal.set_value(format_currency(total_m))
+        self._kp_ativos.set_value(str(len(ativos)))
+        self._kp_cad.set_value(str(len(self._by_id)))
+
     def reload(self) -> None:
+        self._by_id.clear()
         rows = []
         for fe in fixed_expenses_service.list_all():
+            if fe.id is not None:
+                self._by_id[fe.id] = fe
             cat = fe.categoria_nome or "—"
             rows.append((fe.id or 0, [
                 fe.nome,
@@ -168,6 +187,19 @@ class _FixedCrud(CrudPage):
                 "Sim" if fe.ativo else "Não",
             ]))
         self.model.set_rows(rows)
+        self._refresh_kpi_cards()
+        self.refresh_totals()
+
+    def compute_totals(self, visible_ids: list[int]) -> None:
+        if not self._by_id:
+            self.set_footer_text("", "")
+            return
+        vis = [self._by_id[i] for i in visible_ids if i in self._by_id]
+        total = sum(fe.valor_mensal for fe in vis)
+        self.set_footer_text(
+            f"Total mensal (visíveis): {format_currency(total)}",
+            f"Itens: {len(vis)}",
+        )
 
     def _add(self) -> None:
         dlg = FixedExpenseDialog(self)
@@ -208,6 +240,7 @@ class _MonthlyControl(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._rows: list[tuple[int, QComboBox]] = []
+        self._monthly_hints: list[str] = []
 
         hint = QLabel(
             "Escolha a competência (mês/ano). Cada item ativo aparece como Pendente até você marcar Pago. "
@@ -233,6 +266,22 @@ class _MonthlyControl(QWidget):
         )
         self.btn_edit.clicked.connect(self._edit_selected)
         row.addWidget(self.btn_edit)
+
+        kpi_row = QHBoxLayout()
+        self._kp_pago = KpiCard("Pago no mês", "-", compact=True)
+        self._kp_pend = KpiCard("Pendente no mês", "-", compact=True)
+        self._kp_mes = KpiCard("Total do mês", "-", compact=True)
+        kpi_row.addWidget(self._kp_pago)
+        kpi_row.addWidget(self._kp_pend)
+        kpi_row.addWidget(self._kp_mes)
+
+        search_row = QHBoxLayout()
+        search_row.addWidget(QLabel("Buscar:"))
+        self._monthly_search = QLineEdit()
+        self._monthly_search.setPlaceholderText("Buscar…")
+        self._monthly_search.setClearButtonEnabled(True)
+        self._monthly_search.textChanged.connect(self._apply_monthly_search)
+        search_row.addWidget(self._monthly_search, 1)
 
         self.tbl = QTableWidget(0, 5)
         self.tbl.setHorizontalHeaderLabels(
@@ -280,6 +329,8 @@ class _MonthlyControl(QWidget):
         layout.setSpacing(12)
         layout.addWidget(hint)
         layout.addLayout(row)
+        layout.addLayout(kpi_row)
+        layout.addLayout(search_row)
         layout.addWidget(self.tbl, 1)
         layout.addWidget(proj_title)
         layout.addWidget(self.tbl_proj, 1)
@@ -304,6 +355,33 @@ class _MonthlyControl(QWidget):
             return
         self._edit_row(row)
 
+    def _refresh_monthly_kpis(self) -> None:
+        ym = self.ano_mes()
+        pago = 0.0
+        pend = 0.0
+        for fe in fixed_expenses_service.list_active():
+            if fe.id is None:
+                continue
+            v = float(fe.valor_mensal)
+            if fixed_expenses_service.is_paid(fe.id, ym):
+                pago += v
+            else:
+                pend += v
+        total = pago + pend
+        self._kp_pago.set_value(format_currency(pago))
+        self._kp_pend.set_value(format_currency(pend))
+        self._kp_mes.set_value(format_currency(total))
+
+    def _apply_monthly_search(self) -> None:
+        needle = self._monthly_search.text().strip().lower()
+        for i in range(self.tbl.rowCount()):
+            if i >= len(self._monthly_hints):
+                continue
+            if not needle:
+                self.tbl.setRowHidden(i, False)
+            else:
+                self.tbl.setRowHidden(i, needle not in self._monthly_hints[i])
+
     def _edit_row(self, row: int) -> None:
         if row < 0 or row >= len(self._rows):
             return
@@ -320,6 +398,7 @@ class _MonthlyControl(QWidget):
 
     def _reload_table(self) -> None:
         self._rows.clear()
+        self._monthly_hints.clear()
         ym = self.ano_mes()
         items = fixed_expenses_service.list_active()
         self.tbl.setRowCount(len(items))
@@ -382,6 +461,7 @@ class _MonthlyControl(QWidget):
                         )
                     self.data_changed.emit()
                     self._reload_projection()
+                    self._refresh_monthly_kpis()
 
                 return on_change
 
@@ -394,6 +474,21 @@ class _MonthlyControl(QWidget):
             status_lay.addWidget(cb, 1, Qt.AlignmentFlag.AlignVCenter)
             self.tbl.setCellWidget(i, 3, status_cell)
             self._rows.append((fid, cb))
+
+            st_txt = "pago" if pago else "pendente"
+            hint = " ".join(
+                [
+                    fe.nome.lower(),
+                    format_currency(fe.valor_mensal).lower(),
+                    str(fe.dia_referencia),
+                    st_txt,
+                    (fe.observacao or "").lower(),
+                ]
+            )
+            self._monthly_hints.append(hint)
+
+        self._refresh_monthly_kpis()
+        self._apply_monthly_search()
 
     def _reload_projection(self) -> None:
         data = fixed_expenses_service.projection_by_month_rest_of_year()

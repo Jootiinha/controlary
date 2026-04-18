@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services import accounts_service, card_invoices_service, cards_service
+from app.ui.widgets.card import KpiCard
 from app.ui.widgets.crud_page import CrudPage
 from app.utils.formatting import format_currency, format_month_br
 
@@ -196,27 +197,49 @@ class CardInvoicesView(CrudPage):
         self.btn_edit.clicked.connect(self._open_selected)
         self.btn_delete.setVisible(False)
         self.table.doubleClicked.connect(lambda _: self._open_selected())
+        self._by_card: dict[int, tuple[float, float, str]] = {}
+        self.totals_wrap.setVisible(True)
+        self._kp_sug = KpiCard("Total sugerido", "-", compact=True)
+        self._kp_reg = KpiCard("Total registrado", "-", compact=True)
+        self._kp_pagas = KpiCard("Pagas", "-", compact=True)
+        self._kp_pend = KpiCard("Pendentes", "-", compact=True)
+        self.totals_bar.addWidget(self._kp_sug)
+        self.totals_bar.addWidget(self._kp_reg)
+        self.totals_bar.addWidget(self._kp_pagas)
+        self.totals_bar.addWidget(self._kp_pend)
         self.reload()
 
     def ano_mes(self) -> str:
         d = self.dt.date()
         return f"{d.year():04d}-{d.month():02d}"
 
+    def _refresh_kpi_cards(self) -> None:
+        total_sug = sum(t[0] for t in self._by_card.values())
+        total_reg = sum(t[1] for t in self._by_card.values())
+        n_pagas = sum(1 for t in self._by_card.values() if t[2] == "paga")
+        n_pend = len(self._by_card) - n_pagas
+        self._kp_sug.set_value(format_currency(total_sug))
+        self._kp_reg.set_value(format_currency(total_reg))
+        self._kp_pagas.set_value(str(n_pagas))
+        self._kp_pend.set_value(str(n_pend))
+
     def reload(self) -> None:
         ym = self.ano_mes()
+        self._by_card.clear()
         rows = []
         for row in card_invoices_service.list_all_cards_with_invoice_hint(ym):
             card = row["card"]
             if card.id is None:
                 continue
             cid = card.id
-            sug = row["suggested"]
+            sug = float(row["suggested"])
             inv = row["invoice"]
             cnt = row["contained_count"]
             valor_reg = float(inv.valor_total) if inv is not None else 0.0
             if inv is None or inv.valor_total <= 0:
                 valor_reg = sug
             st = inv.status if inv is not None else "—"
+            self._by_card[cid] = (sug, valor_reg, st)
             d_v = card.dia_pagamento_fatura
             vence = f"Dia {d_v:02d}"
             rows.append((cid, [
@@ -229,6 +252,25 @@ class CardInvoicesView(CrudPage):
             ]))
         self.model.set_rows(rows)
         self._ym = ym
+        self._refresh_kpi_cards()
+        self.refresh_totals()
+
+    def compute_totals(self, visible_ids: list[int]) -> None:
+        if not self._by_card:
+            self.set_footer_text("", "")
+            return
+        sug = 0.0
+        reg = 0.0
+        for cid in visible_ids:
+            t = self._by_card.get(cid)
+            if t is None:
+                continue
+            sug += t[0]
+            reg += t[1]
+        self.set_footer_text(
+            f"Sugerido (visíveis): {format_currency(sug)}",
+            f"Registrado (visíveis): {format_currency(reg)}",
+        )
 
     def _open_selected(self) -> None:
         cid = self.selected_id()

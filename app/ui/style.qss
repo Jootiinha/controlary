@@ -54,6 +54,12 @@ QFrame#KpiCard {
     border-radius: 12px;
     padding: 16px;
 }
+QFrame#CrudFooter {
+    background-color: #F3F4F6;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+}
+
 QFrame#KpiCardCompact {
     background-color: #FFFFFF;
     border: 1px solid #E5E7EB;

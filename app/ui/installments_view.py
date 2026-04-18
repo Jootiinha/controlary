@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from app.models.installment import Installment
 from app.services import cards_service, installments_service
 from app.ui.categories_view import CategoryDialog
+from app.ui.widgets.card import KpiCard
 from app.ui.widgets.category_picker import CategoryPicker
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
@@ -174,15 +175,38 @@ class InstallmentsView(CrudPage):
                 "Pagas", "Restantes", "Saldo devedor", "Status",
             ],
         )
+        self._by_id: dict[int, Installment] = {}
+        self.totals_wrap.setVisible(True)
+        self._kp_saldo = KpiCard("Saldo devedor (ativos)", "-", compact=True)
+        self._kp_parcela = KpiCard("Parcela mensal (ativos)", "-", compact=True)
+        self._kp_ativos = KpiCard("Ativos", "-", compact=True)
+        self._kp_quit = KpiCard("Quitados", "-", compact=True)
+        self.totals_bar.addWidget(self._kp_saldo)
+        self.totals_bar.addWidget(self._kp_parcela)
+        self.totals_bar.addWidget(self._kp_ativos)
+        self.totals_bar.addWidget(self._kp_quit)
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
         self.btn_delete.clicked.connect(self._delete)
         self.btn_refresh.clicked.connect(self.reload)
         self.reload()
 
+    def _refresh_kpi_cards(self) -> None:
+        ativos = [i for i in self._by_id.values() if i.status == "ativo"]
+        quitados = [i for i in self._by_id.values() if i.status != "ativo"]
+        saldo = sum(i.saldo_devedor for i in ativos)
+        parc_m = sum(i.valor_parcela for i in ativos)
+        self._kp_saldo.set_value(format_currency(saldo))
+        self._kp_parcela.set_value(format_currency(parc_m))
+        self._kp_ativos.set_value(str(len(ativos)))
+        self._kp_quit.set_value(str(len(quitados)))
+
     def reload(self) -> None:
+        self._by_id.clear()
         rows = []
         for i in installments_service.list_all():
+            if i.id is not None:
+                self._by_id[i.id] = i
             cnome = i.cartao_nome or "—"
             cat = i.categoria_nome or "—"
             rows.append((i.id or 0, [
@@ -198,6 +222,20 @@ class InstallmentsView(CrudPage):
                 i.status.capitalize(),
             ]))
         self.model.set_rows(rows)
+        self._refresh_kpi_cards()
+        self.refresh_totals()
+
+    def compute_totals(self, visible_ids: list[int]) -> None:
+        if not self._by_id:
+            self.set_footer_text("", "")
+            return
+        vis = [self._by_id[i] for i in visible_ids if i in self._by_id]
+        saldo = sum(i.saldo_devedor for i in vis)
+        rest = sum(i.parcelas_restantes for i in vis)
+        self.set_footer_text(
+            f"Saldo devedor (visíveis): {format_currency(saldo)}",
+            f"Parcelas restantes (visíveis): {rest}",
+        )
 
     def _add(self) -> None:
         if not cards_service.list_all():

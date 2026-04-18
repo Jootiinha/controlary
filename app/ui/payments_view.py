@@ -1,6 +1,7 @@
 """Tela de CRUD de pagamentos."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional
 
 from PySide6.QtCore import QDate, Signal
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
 from app.models.payment import Payment
 from app.services import accounts_service, cards_service, payments_service
 from app.ui.categories_view import CategoryDialog
+from app.ui.widgets.card import KpiCard
 from app.ui.widgets.category_picker import CategoryPicker
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.payment_confirmation_dialog import PaymentRecordedDialog
@@ -202,15 +204,39 @@ class PaymentsView(CrudPage):
             "Registre seus gastos avulsos e acompanhe o histórico.",
             ["Data", "Descrição", "Origem", "Categoria", "Forma", "Valor", "Observação"],
         )
+        self._by_id: dict[int, Payment] = {}
+        self.totals_wrap.setVisible(True)
+        self._kp_mes = KpiCard("Total do mês atual", "-", compact=True)
+        self._kp_geral = KpiCard("Total geral", "-", compact=True)
+        self._kp_qtd = KpiCard("Quantidade", "-", compact=True)
+        self.totals_bar.addWidget(self._kp_mes)
+        self.totals_bar.addWidget(self._kp_geral)
+        self.totals_bar.addWidget(self._kp_qtd)
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
         self.btn_delete.clicked.connect(self._delete)
         self.btn_refresh.clicked.connect(self.reload)
         self.reload()
 
+    def _refresh_kpi_cards(self) -> None:
+        today = date.today()
+        ym = f"{today.year:04d}-{today.month:02d}"
+        total_mes = 0.0
+        total_geral = 0.0
+        for p in self._by_id.values():
+            total_geral += p.valor
+            if p.data.startswith(ym):
+                total_mes += p.valor
+        self._kp_mes.set_value(format_currency(total_mes))
+        self._kp_geral.set_value(format_currency(total_geral))
+        self._kp_qtd.set_value(str(len(self._by_id)))
+
     def reload(self) -> None:
+        self._by_id.clear()
         rows = []
         for p in payments_service.list_all():
+            if p.id is not None:
+                self._by_id[p.id] = p
             nome = p.conta_nome or p.cartao_nome or "—"
             cat = p.categoria_nome or "—"
             rows.append((p.id or 0, [
@@ -223,6 +249,19 @@ class PaymentsView(CrudPage):
                 p.observacao or "",
             ]))
         self.model.set_rows(rows)
+        self._refresh_kpi_cards()
+        self.refresh_totals()
+
+    def compute_totals(self, visible_ids: list[int]) -> None:
+        if not self._by_id:
+            self.set_footer_text("", "")
+            return
+        vis = [self._by_id[i] for i in visible_ids if i in self._by_id]
+        total = sum(p.valor for p in vis)
+        self.set_footer_text(
+            f"Total (visíveis): {format_currency(total)}",
+            f"Itens: {len(vis)}",
+        )
 
     def _add(self) -> None:
         if not accounts_service.list_all() and not cards_service.list_all():
