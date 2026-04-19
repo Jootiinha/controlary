@@ -1,25 +1,4 @@
-Como está sendo calculado o card "Próximo vencimento"?
+Não consigo cadastrar uma renda avulsa com mesmo nome, eu deveria
 
-Onde posso cadastrar o valor total da fatura do mês do cartão e marcar se está paga ou não?
-
-As parcelas são calculadas novamente após a data de vencimento do cartão passar e a fatura estar paga?
-
-Adaptar MAKE para rodar no windows também
-
-Quero vincular um streaming a um cartão para não precisar preencher o dia da cobrança, pois ele estará vinculado a uma data de cartão. Se ele não for vinculado a um cartão, posso preencher o método de pagamento dele (boleto, pix, ted, etc) e de qual conta bancária saiu o dinheiro
-
-Dentro da tela de "Situação mensal", quando tem o select para "Pendente", ela está "comida", pois a linha é muito fina.
-
-Quando eu lançar um pagamento ou despesa fixa, preciso ter uma tela para confirmar o pagamento, junto com as faturas dos cartões de crédito.
-
-Os parcelamentos e streamings ficando dentro de um cartão de crédito e devem e quando eu registrar o valor de uma fatura, vou registar o valor total dela, o sistema precisa entender que os valores dos streamins e parcelamentos estão dentro desse valor.
-
-Posso registrar um pagamento em um cartão de crédito ou conta bancária. Se for cartão de crédito, deve seguir a mesma regra do streaming e parcelamento, ou seja, quando eu lançar o valor da fatura fechada, o sistema precisa entender que esses pagamentos estão contidos lá dentro.
-
-O registro de pagamento pode ser um prestador de serviço, delivery ou qualquer outra despesa avulsa.
-
-Toda despesa do sistema precisa ter uma categoria e eu preciso poder cadastrar essas categorias no sistema. Elas não podem ser preenchidas por texto livre.
-
-A tela de histórico e análises precisa ser mais completa e englobar tudo que o sistema oferece de dados para que eu consiga entender a minha saúde financeira pessoal e tomar decisões sobre minhas economias.
-
-O sistema precisa ter um módulo de cadastro de investimentos em bancos.
+Na tela de históricos e análises, na aba "Fluxo acumulado", a projeção não está considerando as rendas avulsas
+Na tela de históricos e análises, na aba "Renda e despesa", a renda deve ir para o futuro, olhar últimos 3 meses e os próximos 9 meses e considerar rendas fixas e avulsas
