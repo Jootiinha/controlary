@@ -50,8 +50,15 @@ def fetch_data(months: int = 6) -> tuple[list[str], list[float], list[float]]:
     return labels, r_vals, g_vals
 
 
-def plot(ax) -> None:
-    labels, r_vals, g_vals = fetch_data()
+def plot(ax, months_past: int = 3, months_future: int = 9) -> None:
+    keys_past = _last_n_month_keys(months_past)
+    keys_fut = next_n_month_keys(months_future)
+    keys = keys_past + keys_fut
+    labels = [k[5:7] + "/" + k[2:4] for k in keys]
+    r_vals = [income_sources_service.sum_for_month(k) for k in keys]
+    g_vals = [expense_totals_service.total_despesa_mes(k) for k in keys_past]
+    g_vals += [0.0] * len(keys_fut)
+
     x = np.arange(len(labels))
     w = 0.35
     bars_r = ax.bar(
@@ -65,14 +72,17 @@ def plot(ax) -> None:
         color="#EF4444",
     )
     annotate_bars(ax, bars_r, r_vals, fontsize=7, dy=3)
-    annotate_bars(ax, bars_g, g_vals, fontsize=7, dy=3)
+    annotate_bars(ax, bars_g, g_vals[: len(keys_past)], fontsize=7, dy=3)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=8)
+    if keys_past and keys_fut:
+        ax.axvline(len(keys_past) - 0.5, color="#9CA3AF", linewidth=0.9, linestyle=":")
     ax.legend(fontsize=8)
     ax.yaxis.set_major_formatter(
         FuncFormatter(lambda v, _: format_currency_short(v))
     )
     ax.set_title(
-        "Renda esperada (por mês) vs despesas\n(caixa no mês + compras no cartão)"
+        "Renda esperada (recorrente + avulsa) vs despesas\n"
+        f"Últimos {months_past} meses (realizado) e próximos {months_future} (renda projetada)"
     )
     ax.grid(True, axis="y", alpha=0.25)

@@ -399,6 +399,69 @@ def _migrate_income_sources_avulsas_parceladas(conn) -> None:
         conn.execute("ALTER TABLE income_sources ADD COLUMN forma_recebimento TEXT")
 
 
+def _income_sources_has_global_unique_nome(conn) -> bool:
+    indexes = conn.execute("PRAGMA index_list(income_sources)").fetchall()
+    for idx in indexes:
+        if not int(idx["unique"]):
+            continue
+        partial = int(idx["partial"]) if "partial" in idx.keys() else 0
+        if partial:
+            continue
+        cols = conn.execute(f"PRAGMA index_info({idx['name']})").fetchall()
+        col_names = [c["name"] for c in cols]
+        if col_names == ["nome"]:
+            return True
+    return False
+
+
+def _migrate_income_sources_relax_nome_unique(conn) -> None:
+    """Permite nomes duplicados em rendas avulsas (mantém unicidade para recorrentes/parceladas)."""
+    if _income_sources_has_global_unique_nome(conn):
+        conn.executescript(
+            """
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE income_sources_new (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome                TEXT    NOT NULL COLLATE NOCASE,
+                valor_mensal        REAL    NOT NULL,
+                ativo               INTEGER NOT NULL DEFAULT 1,
+                dia_recebimento     INTEGER NOT NULL DEFAULT 5,
+                account_id          INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+                observacao          TEXT,
+                tipo                TEXT    NOT NULL DEFAULT 'recorrente'
+                                    CHECK (tipo IN ('recorrente', 'avulsa', 'parcelada')),
+                mes_referencia      TEXT,
+                total_parcelas      INTEGER,
+                parcelas_recebidas  INTEGER NOT NULL DEFAULT 0,
+                forma_recebimento   TEXT,
+                CHECK (valor_mensal >= 0),
+                CHECK (dia_recebimento BETWEEN 1 AND 31),
+                CHECK (tipo = 'recorrente' OR mes_referencia IS NOT NULL),
+                CHECK (tipo <> 'parcelada' OR (
+                    total_parcelas IS NOT NULL AND total_parcelas >= 1
+                    AND parcelas_recebidas >= 0 AND parcelas_recebidas <= total_parcelas
+                ))
+            );
+            INSERT INTO income_sources_new (
+                id, nome, valor_mensal, ativo, dia_recebimento, account_id, observacao,
+                tipo, mes_referencia, total_parcelas, parcelas_recebidas, forma_recebimento
+            )
+            SELECT id, nome, valor_mensal, ativo, dia_recebimento, account_id, observacao,
+                   tipo, mes_referencia, total_parcelas, parcelas_recebidas, forma_recebimento
+              FROM income_sources;
+            DROP TABLE income_sources;
+            ALTER TABLE income_sources_new RENAME TO income_sources;
+            CREATE INDEX IF NOT EXISTS idx_income_sources_ativo ON income_sources(ativo);
+            CREATE INDEX IF NOT EXISTS idx_income_sources_account ON income_sources(account_id);
+            PRAGMA foreign_keys = ON;
+            """
+        )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uniq_income_sources_nome_non_avulsa "
+        "ON income_sources(nome COLLATE NOCASE) WHERE tipo <> 'avulsa'"
+    )
+
+
 def _migrate_installments_account_id(conn) -> None:
     cols = _table_columns(conn, "installments")
     if "account_id" not in cols:
@@ -516,6 +579,7 @@ def run_migrations() -> None:
         _migrate_accounts_saldo_e_transacoes(conn)
         _migrate_income_sources_account_id(conn)
         _migrate_income_sources_avulsas_parceladas(conn)
+        _migrate_income_sources_relax_nome_unique(conn)
         _migrate_installments_account_id(conn)
         _migrate_month_tracking_tables(conn)
         _ensure_indexes_on_fk_columns(conn)

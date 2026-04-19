@@ -37,6 +37,7 @@ FORMAS_RECEBIMENTO = [
     "Dinheiro",
     "Boleto",
     "Cheque",
+    "VR/VA",
 ]
 
 
@@ -361,8 +362,10 @@ class _IncomeAvulsasCrud(CrudPage):
         self._by_id: dict[int, IncomeSource] = {}
         self.totals_wrap.setVisible(True)
         self._kp_mes = KpiCard("Total no mês atual", "-", compact=True)
+        self._kp_a_receber = KpiCard("Saldo a receber", "-", compact=True)
         self._kp_cad = KpiCard("Cadastradas", "-", compact=True)
         self.totals_bar.addWidget(self._kp_mes)
+        self.totals_bar.addWidget(self._kp_a_receber)
         self.totals_bar.addWidget(self._kp_cad)
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
@@ -385,7 +388,12 @@ class _IncomeAvulsasCrud(CrudPage):
             for s in self._by_id.values()
             if income_sources_service.applies_to_month(s, ym)
         )
+        a_receber = sum(
+            income_sources_service.paid_remaining(s)[1]
+            for s in self._by_id.values()
+        )
         self._kp_mes.set_value(format_currency(total))
+        self._kp_a_receber.set_value(format_currency(a_receber))
         self._kp_cad.set_value(str(len(self._by_id)))
 
     def reload(self) -> None:

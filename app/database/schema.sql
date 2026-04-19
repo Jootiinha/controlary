@@ -147,7 +147,7 @@ CREATE INDEX IF NOT EXISTS idx_fixed_expense_months_mes ON fixed_expense_months(
 
 CREATE TABLE IF NOT EXISTS income_sources (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome                TEXT    NOT NULL COLLATE NOCASE UNIQUE,
+    nome                TEXT    NOT NULL COLLATE NOCASE,
     valor_mensal        REAL    NOT NULL,
     ativo               INTEGER NOT NULL DEFAULT 1,
     dia_recebimento     INTEGER NOT NULL DEFAULT 5,
@@ -169,6 +169,8 @@ CREATE TABLE IF NOT EXISTS income_sources (
 );
 
 CREATE INDEX IF NOT EXISTS idx_income_sources_ativo ON income_sources(ativo);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_income_sources_nome_non_avulsa
+    ON income_sources(nome COLLATE NOCASE) WHERE tipo <> 'avulsa';
 
 CREATE TABLE IF NOT EXISTS income_months (
     income_source_id INTEGER NOT NULL REFERENCES income_sources(id) ON DELETE CASCADE,
