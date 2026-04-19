@@ -11,8 +11,10 @@ from app.services import (
     cards_service,
     fixed_expenses_service,
     income_sources_service,
+    installment_months_service,
     installments_service,
     payments_service,
+    subscription_months_service,
     subscriptions_service,
 )
 from app.utils.formatting import parse_date
@@ -23,7 +25,7 @@ CalendarEventType = Literal[
 
 PARCELA_FALLBACK_DIA = 1
 
-UPCOMING_HORIZON_DAYS = 14
+UPCOMING_HORIZON_DAYS = 7
 
 _TIPO_ORDEM: dict[CalendarEventType, int] = {
     "renda": 0,
@@ -247,9 +249,15 @@ def upcoming_payables(horizon_days: int = UPCOMING_HORIZON_DAYS) -> list[Calenda
                 continue
             if ev.pago:
                 continue
+            ano_mes = f"{ev.data.year:04d}-{ev.data.month:02d}"
             if ev.tipo == "fixo" and ev.ref_id is not None:
-                ano_mes = f"{ev.data.year:04d}-{ev.data.month:02d}"
                 if fixed_expenses_service.is_paid(ev.ref_id, ano_mes):
+                    continue
+            if ev.tipo == "assinatura" and ev.ref_id is not None:
+                if subscription_months_service.is_paid(ev.ref_id, ano_mes):
+                    continue
+            if ev.tipo == "parcela" and ev.ref_id is not None:
+                if installment_months_service.is_paid(ev.ref_id, ano_mes):
                     continue
             out.append(ev)
     out.sort(

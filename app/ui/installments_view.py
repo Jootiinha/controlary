@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.models.income_source import competencias_parcelada
 from app.models.installment import Installment
 from app.services import (
     accounts_service,
@@ -319,14 +320,14 @@ class _InstallmentsCrud(CrudPage):
 
 
 class _InstallmentMonthlyControl(QWidget):
-    """Parcelas em conta na competência do mês de referência."""
+    """Parcelas em conta por competência (cronograma a partir do mês de referência)."""
     data_changed = Signal()
 
     def __init__(self) -> None:
         super().__init__()
         hint = QLabel(
-            "Parcelamentos à vista na conta cujo mês de referência coincide com a competência. "
-            "Marque Pago quando debitar a parcela."
+            "Parcelamentos à vista na conta: cada linha é um mês do plano a partir do mês de referência "
+            "até o último da compra. Marque Pago quando debitar a parcela nessa competência."
         )
         hint.setWordWrap(True)
         hint.setObjectName("PageSubtitle")
@@ -360,7 +361,7 @@ class _InstallmentMonthlyControl(QWidget):
             if i.status == "ativo"
             and i.account_id is not None
             and i.cartao_id is None
-            and i.mes_referencia == ym
+            and ym in competencias_parcelada(i.mes_referencia, i.total_parcelas)
             and i.id is not None
         ]
         self.tbl.setRowCount(len(items))
@@ -394,6 +395,7 @@ class _InstallmentMonthlyControl(QWidget):
                     installment_months_service.set_month_status(
                         inst_id, competencia, pago=want
                     )
+                    self.reload_table()
                     self.data_changed.emit()
 
                 return on_change

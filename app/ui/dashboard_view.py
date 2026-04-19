@@ -39,12 +39,9 @@ class DashboardView(QWidget):
         self.card_renda = KpiCard(
             "Renda mensal", subtitle="Soma das fontes ativas", compact=True
         )
-        self.card_gasto_mes = KpiCard(
-            "Gasto no mês", subtitle="Lançamentos em pagamentos", compact=True
-        )
-        self.card_previsto = KpiCard(
-            "Previsto do mês",
-            subtitle="Faturas + recorrentes + fixos + avulsos (conta)",
+        self.card_gasto_previsto_mes = KpiCard(
+            "Gasto previsto no mês",
+            subtitle="Já lançado em pagamentos: —",
             compact=True,
         )
         self.card_margem_previsto = KpiCard(
@@ -63,16 +60,6 @@ class DashboardView(QWidget):
         self.card_assinaturas = KpiCard(
             "Assinaturas", subtitle="0 ativas", compact=True
         )
-        self.card_proximo = KpiCard(
-            "Próximo vencimento",
-            subtitle="Nenhum",
-            compact=True,
-        )
-        self.card_proximo.setToolTip(
-            "Primeiro compromisso nos próximos "
-            f"{calendar_service.UPCOMING_HORIZON_DAYS} dias: "
-            "fatura de cartão, assinatura em conta, fixo pendente, parcela à vista."
-        )
 
         self.card_saldo_contas = KpiCard(
             "Saldo em contas",
@@ -81,28 +68,15 @@ class DashboardView(QWidget):
         )
         self.card_saldo_fim_mes = KpiCard(
             "Saldo fim do mês (est.)",
-            subtitle="Contas + entradas previstas − compromissos a pagar",
+            subtitle="Renda mensal + saldos em contas − gasto previsto no mês",
             compact=True,
         )
         self.card_saldo_fim_mes.setToolTip(
-            "Patrimônio líquido estimado: soma dos saldos em conta corrente, "
-            "mais renda ainda esperada no mês (dia ≥ hoje e não marcada como recebida), "
-            "menos fixos pendentes, faturas de cartão em aberto, assinaturas em conta "
-            "e parcelas em conta ainda não marcadas como pagas na competência."
+            "Estimativa: soma da renda mensal (fontes ativas no mês) com os saldos "
+            "atuais em conta corrente, menos o gasto previsto do mês (mesmo total do "
+            "card «Gasto previsto no mês»)."
         )
 
-        line1 = (
-            self.card_renda,
-            self.card_gasto_mes,
-            self.card_previsto,
-            self.card_margem_previsto,
-        )
-        line2 = (
-            self.card_invest,
-            self.card_fixos_mes,
-            self.card_assinaturas,
-            self.card_proximo,
-        )
         kpi_grid = QGridLayout()
         kpi_grid.setContentsMargins(0, 0, 0, 0)
         kpi_grid.setHorizontalSpacing(12)
@@ -111,10 +85,12 @@ class DashboardView(QWidget):
             kpi_grid.setColumnMinimumWidth(c, _CARD_MIN_W)
             kpi_grid.setColumnStretch(c, 1)
         align = Qt.AlignmentFlag.AlignTop
-        for col, w in enumerate(line1):
-            kpi_grid.addWidget(w, 0, col, align)
-        for col, w in enumerate(line2):
-            kpi_grid.addWidget(w, 1, col, align)
+        kpi_grid.addWidget(self.card_renda, 0, 0, 1, 1, align)
+        kpi_grid.addWidget(self.card_gasto_previsto_mes, 0, 1, 1, 2, align)
+        kpi_grid.addWidget(self.card_margem_previsto, 0, 3, 1, 1, align)
+        kpi_grid.addWidget(self.card_invest, 1, 0, 1, 1, align)
+        kpi_grid.addWidget(self.card_fixos_mes, 1, 1, 1, 1, align)
+        kpi_grid.addWidget(self.card_assinaturas, 1, 2, 1, 2, align)
         # Terceira linha: só 2 KPIs — cada um ocupa 2 colunas para não deixar metade da faixa vazia
         kpi_grid.addWidget(self.card_saldo_contas, 2, 0, 1, 2, align)
         kpi_grid.addWidget(self.card_saldo_fim_mes, 2, 2, 1, 2, align)
@@ -269,14 +245,17 @@ class DashboardView(QWidget):
         self.lbl_subtitle.setText(f"Referência: {format_month_br(data.mes_referencia)}")
 
         self.card_renda.set_value(format_currency(data.renda_mensal_total))
-        self.card_gasto_mes.set_value(format_currency(data.total_gasto_mes))
-        self.card_previsto.set_value(format_currency(data.previsto_mes))
-        self.card_previsto.setToolTip(
-            "Inclui faturas de cartão em aberto (valor registrado ou sugerido), "
-            "assinaturas em conta, parcelas sem cartão no mês, fixos pendentes e "
-            "todos os lançamentos avulsos em conta no mês (pagamentos sem cartão). "
-            "Se o mesmo gasto estiver como assinatura/fixo e também lançado em Pagamentos, "
-            "pode haver sobreposição."
+        self.card_gasto_previsto_mes.set_value(format_currency(data.previsto_mes))
+        self.card_gasto_previsto_mes.set_subtitle(
+            f"Já lançado em pagamentos: {format_currency(data.total_gasto_mes)}"
+        )
+        self.card_gasto_previsto_mes.setToolTip(
+            "Total previsto para o mês: faturas de cartão em aberto (valor registrado "
+            "ou sugerido), assinaturas em conta, parcelas sem cartão no mês, fixos "
+            "pendentes e lançamentos avulsos em conta (pagamentos sem cartão). "
+            "O subtítulo é a soma já lançada em Pagamentos (todos os meios). "
+            "Se o mesmo gasto estiver como assinatura/fixo e também em Pagamentos, "
+            "pode haver sobreposição no previsto."
         )
         self.card_margem_previsto.set_value(format_currency(data.margem_apos_previsto))
 
@@ -299,16 +278,6 @@ class DashboardView(QWidget):
         self.card_assinaturas.set_subtitle(
             f"{data.assinaturas_ativas_qtd} ativas"
         )
-
-        if data.proximos_vencimentos:
-            ev = data.proximos_vencimentos[0]
-            self.card_proximo.set_value(format_currency(ev.valor))
-            self.card_proximo.set_subtitle(
-                f"{format_date_br(ev.data)} · {ev.titulo}"
-            )
-        else:
-            self.card_proximo.set_value("—")
-            self.card_proximo.set_subtitle("Nenhum")
 
         self._fill_table(data.gastos_por_conta, self.tbl_contas)
         self._fill_table(data.gastos_por_forma, self.tbl_formas)

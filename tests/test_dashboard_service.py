@@ -36,6 +36,8 @@ def test_load_dashboard_totals_and_breakdown(test_db_path: Path) -> None:
     assert data.mes_referencia == REF_MONTH
     assert data.total_gasto_mes == 50.0
     assert data.renda_mensal_total == 5000.0
+    assert data.previsto_mes == 50.0
+    assert data.saldo_projetado_fim_mes == 5950.0
     assert data.margem_apos_gasto == 4950.0
     assert data.gastos_por_conta == [("Conta A", 50.0)]
     assert data.gastos_por_forma == [("Pix", 50.0)]

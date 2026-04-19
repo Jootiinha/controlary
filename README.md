@@ -5,9 +5,9 @@ Roda 100% offline, com persistência local e interface nativa moderna.
 
 ## Funcionalidades
 
-- **Dashboard** com 8 KPIs padronizados (2×4) do mês corrente:
-  - Fluxo: renda mensal, gasto no mês, previsto do mês, saldo projetado
-  - Compromissos: parcelas do mês, fixos pendentes, assinaturas, próximo vencimento
+- **Dashboard** com KPIs do mês corrente (gasto previsto unifica faturas/recorrentes/fixos e mostra o realizado em subtítulo; saldo fim do mês = renda mensal + saldos em contas − gasto previsto)
+  - Fluxo: renda mensal, gasto previsto no mês, margem de fluxo, saldos em contas e saldo fim do mês (est.)
+  - Compromissos: investimentos, fixos pendentes, assinaturas
   - Tabela de **próximos vencimentos** (14 dias), gráfico anual e quebra por conta/forma de pagamento
 - **Renda**: múltiplas fontes de renda mensais com dia de recebimento e status ativa/inativa
 - **Contas e cartões**: cadastro base, com dia de pagamento da fatura por cartão

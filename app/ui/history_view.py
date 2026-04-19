@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.charts import (
-    category_breakdown,
+    category_month_views,
     comprometimento_renda,
     debt_evolution,
     fluxo_acumulado,
@@ -44,7 +44,7 @@ class HistoryView(QWidget):
         )
         self.tabs.addTab(self._build_chart_tab(monthly_expenses.plot), "Custo de vida")
         self.tabs.addTab(self._build_chart_tab(invoice_evolution.plot), "Evolução da fatura")
-        self.tabs.addTab(self._build_chart_tab(category_breakdown.plot), "Categorias")
+        self.tabs.addTab(self._build_categories_tab(), "Categorias")
         self.tabs.addTab(self._build_chart_tab(debt_evolution.plot), "Saldo devedor")
         self.tabs.addTab(
             self._build_chart_tab(investments_overview.plot), "Investimentos"
@@ -78,6 +78,17 @@ class HistoryView(QWidget):
         wrapper._canvas = canvas  # type: ignore[attr-defined]
         return wrapper
 
+    def _build_categories_tab(self) -> QWidget:
+        c1 = ChartCanvas(category_month_views.make_plot_ledger(), height=3.2)
+        c2 = ChartCanvas(category_month_views.make_plot_cost_of_living(), height=3.2)
+        wrapper = QWidget()
+        lay = QVBoxLayout(wrapper)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.addWidget(c1)
+        lay.addWidget(c2)
+        wrapper._canvases = [c1, c2]  # type: ignore[attr-defined]
+        return wrapper
+
     def reload(self) -> None:
         payments = payments_service.list_all()
         rows = []
@@ -97,6 +108,11 @@ class HistoryView(QWidget):
 
         for i in range(1, self.tabs.count()):
             tab = self.tabs.widget(i)
+            multi = getattr(tab, "_canvases", None)
+            if multi:
+                for c in multi:
+                    c.refresh()
+                continue
             canvas = getattr(tab, "_canvas", None)
             if canvas is not None:
                 canvas.refresh()

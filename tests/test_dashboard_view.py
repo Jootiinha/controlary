@@ -18,6 +18,10 @@ def test_dashboard_view_smoke_reload_and_widgets(test_db_path: Path, qtbot: QtBo
         None,
     )
     assert title is not None
+    assert not any(
+        w.text() == "Próximo vencimento"
+        for w in view.findChildren(QLabel)
+    )
 
     scroll = view.findChild(QScrollArea, "DashboardScroll")
     assert scroll is not None

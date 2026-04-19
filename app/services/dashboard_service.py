@@ -41,8 +41,6 @@ class DashboardData:
     proximos_vencimentos: List[CalendarEvent] = field(default_factory=list)
     total_investido: float = 0.0
     saldo_em_contas: float = 0.0
-    entradas_previstas_restantes_mes: float = 0.0
-    saidas_previstas_restantes_mes: float = 0.0
     saldo_projetado_fim_mes: float = 0.0
 
 
@@ -264,59 +262,6 @@ def load(mes: str | None = None) -> DashboardData:
         ).fetchall()
         data.gastos_por_forma = [(r["forma_pagamento"], float(r["total"])) for r in rows]
 
-        sub_pend = 0.0
-        rows = conn.execute(
-            """
-            SELECT s.id, s.valor_mensal
-              FROM subscriptions s
-             WHERE s.status = 'ativa'
-               AND s.account_id IS NOT NULL
-            """
-        ).fetchall()
-        for r in rows:
-            sid = int(r["id"])
-            sm = conn.execute(
-                """
-                SELECT status FROM subscription_months
-                 WHERE subscription_id = ? AND ano_mes = ?
-                """,
-                (sid, mes),
-            ).fetchone()
-            if sm is None or sm["status"] != "pago":
-                sub_pend += float(r["valor_mensal"] or 0)
-
-        parc_pend = 0.0
-        rows = conn.execute(
-            """
-            SELECT i.id, i.valor_parcela
-              FROM installments i
-             WHERE i.status = 'ativo'
-               AND i.account_id IS NOT NULL
-               AND i.cartao_id IS NULL
-               AND i.mes_referencia = ?
-            """,
-            (mes,),
-        ).fetchall()
-        for r in rows:
-            iid = int(r["id"])
-            im = conn.execute(
-                """
-                SELECT status FROM installment_months
-                 WHERE installment_id = ? AND ano_mes = ?
-                """,
-                (iid, mes),
-            ).fetchone()
-            if im is None or im["status"] != "pago":
-                parc_pend += float(r["valor_parcela"] or 0)
-
-        data.saidas_previstas_restantes_mes = round(
-            data.fixos_pendentes_mes
-            + data.previsto_faturas
-            + sub_pend
-            + parc_pend,
-            2,
-        )
-
     data.proximos_vencimentos = calendar_service.upcoming_payables(
         calendar_service.UPCOMING_HORIZON_DAYS
     )
@@ -324,13 +269,8 @@ def load(mes: str | None = None) -> DashboardData:
     data.total_investido = investments_service.total_aplicado()
 
     data.saldo_em_contas = accounts_service.sum_balances()
-    data.entradas_previstas_restantes_mes = (
-        income_sources_service.sum_expected_receipts_rest_of_month(mes)
-    )
     data.saldo_projetado_fim_mes = round(
-        data.saldo_em_contas
-        + data.entradas_previstas_restantes_mes
-        - data.saidas_previstas_restantes_mes,
+        data.renda_mensal_total + data.saldo_em_contas - data.previsto_mes,
         2,
     )
 
