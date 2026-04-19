@@ -104,6 +104,10 @@ def transaction_key_income(src_id: int, ano_mes: str) -> str:
     return f"income:{src_id}:{ano_mes}"
 
 
+def transaction_key_import_credit(batch_id: int, external_id: str) -> str:
+    return f"import_credit:{batch_id}:{external_id}"
+
+
 def current_balance(account_id: int, conn: Optional[sqlite3.Connection] = None) -> float:
     """Saldo até hoje: saldo_inicial + soma das movimentações com data <= hoje."""
 

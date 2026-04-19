@@ -1,6 +1,7 @@
 """Operações de CRUD para pagamentos."""
 from __future__ import annotations
 
+import sqlite3
 from datetime import date
 from typing import List, Optional
 
@@ -43,6 +44,23 @@ def list_between(data_ini: date, data_fim: date) -> List[Payment]:
     return [Payment.from_row(r) for r in rows]
 
 
+def existing_external_ids() -> set[str]:
+    with transaction() as conn:
+        rows = conn.execute(
+            "SELECT external_id FROM payments WHERE external_id IS NOT NULL"
+        ).fetchall()
+    return {str(r[0]) for r in rows if r[0]}
+
+
+def list_ids_by_import_batch(batch_id: int) -> list[int]:
+    with transaction() as conn:
+        rows = conn.execute(
+            "SELECT id FROM payments WHERE import_batch_id = ? ORDER BY id",
+            (batch_id,),
+        ).fetchall()
+    return [int(r[0]) for r in rows]
+
+
 def get(payment_id: int) -> Optional[Payment]:
     with transaction() as conn:
         row = conn.execute(
@@ -66,76 +84,92 @@ def _validate_origin(payment: Payment) -> None:
         raise ValueError("Informe conta bancária ou cartão (apenas um)")
 
 
-def create(payment: Payment, record_ledger: bool = True) -> int:
-    """record_ledger=False evita movimentação no livro-caixa (ex.: espelho de fixo já debitado em set_month_status)."""
+def insert_payment(
+    payment: Payment,
+    conn: sqlite3.Connection,
+    record_ledger: bool = True,
+) -> int:
+    """Insere pagamento usando uma conexão existente (transação externa)."""
     _validate_origin(payment)
     conta_txt: Optional[str] = None
-    with transaction() as conn:
-        if payment.conta_id is not None:
-            row = conn.execute(
-                "SELECT nome FROM accounts WHERE id = ?", (payment.conta_id,)
-            ).fetchone()
-            if not row:
-                raise ValueError("Conta inválida")
-            conta_txt = row["nome"]
-            cur = conn.execute(
-                """
-                INSERT INTO payments (
-                    valor, descricao, data, conta, conta_id, cartao_id,
-                    forma_pagamento, observacao, category_id
-                ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
-                """,
-                (
-                    payment.valor,
-                    payment.descricao,
-                    payment.data,
-                    conta_txt,
-                    payment.conta_id,
-                    payment.forma_pagamento,
-                    payment.observacao,
-                    payment.category_id,
-                ),
-            )
-            pid = int(cur.lastrowid)
-            if record_ledger:
-                desc = payment.descricao
-                if desc and len(desc) > 500:
-                    desc = desc[:500]
-                accounts_service.upsert_transaction(
-                    int(payment.conta_id),
-                    -float(payment.valor),
-                    payment.data,
-                    "pagamento",
-                    accounts_service.transaction_key_payment(pid),
-                    desc,
-                    conn=conn,
-                )
-            return pid
+    if payment.conta_id is not None:
         row = conn.execute(
-            "SELECT nome FROM cards WHERE id = ?", (payment.cartao_id,)
+            "SELECT nome FROM accounts WHERE id = ?", (payment.conta_id,)
         ).fetchone()
         if not row:
-            raise ValueError("Cartão inválido")
-        nome_card = row["nome"]
+            raise ValueError("Conta inválida")
+        conta_txt = row["nome"]
         cur = conn.execute(
             """
             INSERT INTO payments (
                 valor, descricao, data, conta, conta_id, cartao_id,
-                forma_pagamento, observacao, category_id
-            ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)
+                forma_pagamento, observacao, category_id,
+                external_id, import_batch_id
+            ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
             """,
             (
                 payment.valor,
                 payment.descricao,
                 payment.data,
-                nome_card,
-                payment.cartao_id,
+                conta_txt,
+                payment.conta_id,
                 payment.forma_pagamento,
                 payment.observacao,
                 payment.category_id,
+                payment.external_id,
+                payment.import_batch_id,
             ),
         )
-        return int(cur.lastrowid)
+        pid = int(cur.lastrowid)
+        if record_ledger:
+            desc = payment.descricao
+            if desc and len(desc) > 500:
+                desc = desc[:500]
+            accounts_service.upsert_transaction(
+                int(payment.conta_id),
+                -float(payment.valor),
+                payment.data,
+                "pagamento",
+                accounts_service.transaction_key_payment(pid),
+                desc,
+                conn=conn,
+            )
+        return pid
+    row = conn.execute(
+        "SELECT nome FROM cards WHERE id = ?", (payment.cartao_id,)
+    ).fetchone()
+    if not row:
+        raise ValueError("Cartão inválido")
+    nome_card = row["nome"]
+    cur = conn.execute(
+        """
+        INSERT INTO payments (
+            valor, descricao, data, conta, conta_id, cartao_id,
+            forma_pagamento, observacao, category_id,
+            external_id, import_batch_id
+        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            payment.valor,
+            payment.descricao,
+            payment.data,
+            nome_card,
+            payment.cartao_id,
+            payment.forma_pagamento,
+            payment.observacao,
+            payment.category_id,
+            payment.external_id,
+            payment.import_batch_id,
+        ),
+    )
+    return int(cur.lastrowid)
+
+
+def create(payment: Payment, record_ledger: bool = True) -> int:
+    """record_ledger=False evita movimentação no livro-caixa (ex.: espelho de fixo já debitado em set_month_status)."""
+    _validate_origin(payment)
+    with transaction() as conn:
+        return insert_payment(payment, conn, record_ledger=record_ledger)
 
 
 def update(payment: Payment) -> None:
@@ -157,7 +191,8 @@ def update(payment: Payment) -> None:
                 """
                 UPDATE payments
                    SET valor = ?, descricao = ?, data = ?, conta = ?, conta_id = ?,
-                       cartao_id = NULL, forma_pagamento = ?, observacao = ?, category_id = ?
+                       cartao_id = NULL, forma_pagamento = ?, observacao = ?, category_id = ?,
+                       external_id = ?, import_batch_id = ?
                  WHERE id = ?
                 """,
                 (
@@ -169,6 +204,8 @@ def update(payment: Payment) -> None:
                     payment.forma_pagamento,
                     payment.observacao,
                     payment.category_id,
+                    payment.external_id,
+                    payment.import_batch_id,
                     payment.id,
                 ),
             )
@@ -195,7 +232,8 @@ def update(payment: Payment) -> None:
             """
             UPDATE payments
                SET valor = ?, descricao = ?, data = ?, conta = ?, conta_id = NULL,
-                   cartao_id = ?, forma_pagamento = ?, observacao = ?, category_id = ?
+                   cartao_id = ?, forma_pagamento = ?, observacao = ?, category_id = ?,
+                   external_id = ?, import_batch_id = ?
              WHERE id = ?
             """,
             (
@@ -207,6 +245,8 @@ def update(payment: Payment) -> None:
                 payment.forma_pagamento,
                 payment.observacao,
                 payment.category_id,
+                payment.external_id,
+                payment.import_batch_id,
                 payment.id,
             ),
         )

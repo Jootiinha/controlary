@@ -39,11 +39,13 @@ main.py
             └─ app/services/*    (regras de negócio, queries agregadas)
                  └─ app/models/* (dataclasses; sem lógica pesada)
                       └─ app/database/connection.py  (sqlite3, transaction())
+  app/importers/   (parsers OFX/CSV puros — sem SQLite; usados via services/import_service)
 ```
 
 Regras:
 
 - **Views (`app/ui/*_view.py`)** chamam apenas `services/`. Nunca importe `sqlite3` nem acesse `connection` em view.
+- **`app/importers/`** só faz leitura e parse de arquivos (OFX, CSV; XLSX requer `openpyxl` — `poetry add openpyxl` se for usar planilhas). Persistência e regras de negócio ficam em `app/services/import_service.py` e serviços existentes (`payments_service`, `card_invoices_service`, `accounts_service`).
 - **Services** recebem/retornam **dataclasses** de `app/models/`; mantêm SQL e transações. Use `with transaction() as conn:`.
 - **Models** são `@dataclass` simples com `from_row` para construir a partir de `sqlite3.Row`.
 - **Formatação** (moeda, datas, mês) vive em `app/utils/formatting.py`. Nunca formate `R$` ou datas dentro de view/service — importe utilitários.

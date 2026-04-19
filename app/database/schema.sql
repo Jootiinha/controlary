@@ -40,6 +40,32 @@ CREATE TABLE IF NOT EXISTS cards (
 
 CREATE INDEX IF NOT EXISTS idx_cards_account ON cards(account_id);
 
+CREATE TABLE IF NOT EXISTS import_batches (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind          TEXT    NOT NULL CHECK (kind IN ('fatura', 'extrato')),
+    source_label  TEXT,
+    banco         TEXT,
+    target_id     INTEGER NOT NULL,
+    ano_mes       TEXT,
+    file_name     TEXT,
+    imported_at   TEXT    NOT NULL,
+    total         REAL    NOT NULL DEFAULT 0,
+    n_items       INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_batches_imported_at
+    ON import_batches(imported_at);
+
+CREATE TABLE IF NOT EXISTS import_rules (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    padrao       TEXT    NOT NULL,
+    padrao_tipo  TEXT    NOT NULL CHECK (padrao_tipo IN ('contains', 'regex')),
+    category_id  INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    prioridade   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_rules_prioridade ON import_rules(prioridade);
+
 CREATE TABLE IF NOT EXISTS payments (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     valor           REAL    NOT NULL,
@@ -51,10 +77,17 @@ CREATE TABLE IF NOT EXISTS payments (
     forma_pagamento TEXT    NOT NULL,
     observacao      TEXT,
     category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+    external_id     TEXT,
+    import_batch_id INTEGER REFERENCES import_batches(id) ON DELETE SET NULL,
     CHECK (NOT (conta_id IS NOT NULL AND cartao_id IS NOT NULL))
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_external_id
+    ON payments(external_id) WHERE external_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_payments_data ON payments(data);
+
+CREATE INDEX IF NOT EXISTS idx_payments_import_batch ON payments(import_batch_id);
 
 CREATE TABLE IF NOT EXISTS installments (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

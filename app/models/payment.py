@@ -15,6 +15,8 @@ class Payment:
     observacao: Optional[str] = None
     cartao_id: Optional[int] = None
     category_id: Optional[int] = None
+    external_id: Optional[str] = None
+    import_batch_id: Optional[int] = None
     conta_nome: Optional[str] = None
     cartao_nome: Optional[str] = None
     categoria_nome: Optional[str] = None
@@ -32,6 +34,8 @@ class Payment:
         cnome = row["cartao_nome"] if "cartao_nome" in keys and row["cartao_nome"] else None
         cat_id = row["category_id"] if "category_id" in keys else None
         catn = row["categoria_nome"] if "categoria_nome" in keys and row["categoria_nome"] else None
+        ext = row["external_id"] if "external_id" in keys else None
+        bid = row["import_batch_id"] if "import_batch_id" in keys else None
         return cls(
             id=row["id"],
             valor=row["valor"],
@@ -42,6 +46,8 @@ class Payment:
             observacao=row["observacao"],
             cartao_id=cartao_id,
             category_id=cat_id,
+            external_id=ext,
+            import_batch_id=int(bid) if bid is not None else None,
             conta_nome=nome,
             cartao_nome=cnome,
             categoria_nome=catn,

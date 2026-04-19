@@ -455,6 +455,63 @@ def _migrate_month_tracking_tables(conn) -> None:
     )
 
 
+def _migrate_import_tables(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS import_batches (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind          TEXT    NOT NULL CHECK (kind IN ('fatura', 'extrato')),
+            source_label  TEXT,
+            banco         TEXT,
+            target_id     INTEGER NOT NULL,
+            ano_mes       TEXT,
+            file_name     TEXT,
+            imported_at   TEXT    NOT NULL,
+            total         REAL    NOT NULL DEFAULT 0,
+            n_items       INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_import_batches_imported_at
+            ON import_batches(imported_at)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS import_rules (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            padrao       TEXT    NOT NULL,
+            padrao_tipo  TEXT    NOT NULL CHECK (padrao_tipo IN ('contains', 'regex')),
+            category_id  INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+            prioridade   INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_import_rules_prioridade ON import_rules(prioridade)
+        """
+    )
+    cols = _table_columns(conn, "payments")
+    if "external_id" not in cols:
+        conn.execute("ALTER TABLE payments ADD COLUMN external_id TEXT")
+    if "import_batch_id" not in cols:
+        conn.execute("ALTER TABLE payments ADD COLUMN import_batch_id INTEGER")
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_external_id
+            ON payments(external_id) WHERE external_id IS NOT NULL
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_payments_import_batch ON payments(import_batch_id)
+        """
+    )
+
+
 def _migrate_investments_tables(conn) -> None:
     conn.execute(
         """
@@ -518,4 +575,5 @@ def run_migrations() -> None:
         _migrate_income_sources_avulsas_parceladas(conn)
         _migrate_installments_account_id(conn)
         _migrate_month_tracking_tables(conn)
+        _migrate_import_tables(conn)
         _ensure_indexes_on_fk_columns(conn)

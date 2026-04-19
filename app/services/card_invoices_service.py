@@ -1,6 +1,7 @@
 """Faturas de cartão por competência (agregador mensal)."""
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
@@ -59,40 +60,44 @@ def get(cartao_id: int, ano_mes: str) -> Optional[CardInvoice]:
     return CardInvoice.from_row(row) if row else None
 
 
-def suggested_total(cartao_id: int, ano_mes: str) -> float:
-    with transaction() as conn:
-        r1 = conn.execute(
-            """
-            SELECT COALESCE(SUM(valor_parcela), 0) AS t
-              FROM installments
-             WHERE status = 'ativo'
-               AND cartao_id = ?
-               AND mes_referencia = ?
-            """,
-            (cartao_id, ano_mes),
-        ).fetchone()
-        r2 = conn.execute(
-            """
-            SELECT COALESCE(SUM(valor_mensal), 0) AS t
-              FROM subscriptions
-             WHERE status = 'ativa'
-               AND card_id = ?
-            """,
-            (cartao_id,),
-        ).fetchone()
-        r3 = conn.execute(
-            """
-            SELECT COALESCE(SUM(valor), 0) AS t
-              FROM payments
-             WHERE cartao_id = ?
-               AND substr(data, 1, 7) = ?
-            """,
-            (cartao_id, ano_mes),
-        ).fetchone()
+def suggested_total_conn(conn: sqlite3.Connection, cartao_id: int, ano_mes: str) -> float:
+    r1 = conn.execute(
+        """
+        SELECT COALESCE(SUM(valor_parcela), 0) AS t
+          FROM installments
+         WHERE status = 'ativo'
+           AND cartao_id = ?
+           AND mes_referencia = ?
+        """,
+        (cartao_id, ano_mes),
+    ).fetchone()
+    r2 = conn.execute(
+        """
+        SELECT COALESCE(SUM(valor_mensal), 0) AS t
+          FROM subscriptions
+         WHERE status = 'ativa'
+           AND card_id = ?
+        """,
+        (cartao_id,),
+    ).fetchone()
+    r3 = conn.execute(
+        """
+        SELECT COALESCE(SUM(valor), 0) AS t
+          FROM payments
+         WHERE cartao_id = ?
+           AND substr(data, 1, 7) = ?
+        """,
+        (cartao_id, ano_mes),
+    ).fetchone()
     return round(
         float(r1["t"] or 0) + float(r2["t"] or 0) + float(r3["t"] or 0),
         2,
     )
+
+
+def suggested_total(cartao_id: int, ano_mes: str) -> float:
+    with transaction() as conn:
+        return suggested_total_conn(conn, cartao_id, ano_mes)
 
 
 def contained_items(cartao_id: int, ano_mes: str) -> ContainedItems:
@@ -143,7 +148,8 @@ def contained_count(cartao_id: int, ano_mes: str) -> int:
     return len(c.parcelas) + len(c.assinaturas) + len(c.pagamentos_cartao)
 
 
-def upsert(
+def upsert_invoice_conn(
+    conn: sqlite3.Connection,
     cartao_id: int,
     ano_mes: str,
     valor_total: float,
@@ -152,34 +158,46 @@ def upsert(
 ) -> int:
     if status not in ("aberta", "fechada", "paga"):
         raise ValueError("Status de fatura inválido")
-    with transaction() as conn:
-        row = conn.execute(
+    row = conn.execute(
+        """
+        SELECT id FROM card_invoices
+         WHERE cartao_id = ? AND ano_mes = ?
+        """,
+        (cartao_id, ano_mes),
+    ).fetchone()
+    if row:
+        iid = int(row["id"])
+        conn.execute(
             """
-            SELECT id FROM card_invoices
-             WHERE cartao_id = ? AND ano_mes = ?
+            UPDATE card_invoices
+               SET valor_total = ?, status = ?, observacao = COALESCE(?, observacao)
+             WHERE id = ?
             """,
-            (cartao_id, ano_mes),
-        ).fetchone()
-        if row:
-            iid = int(row["id"])
-            conn.execute(
-                """
-                UPDATE card_invoices
-                   SET valor_total = ?, status = ?, observacao = COALESCE(?, observacao)
-                 WHERE id = ?
-                """,
-                (valor_total, status, observacao, iid),
-            )
-            return iid
-        cur = conn.execute(
-            """
-            INSERT INTO card_invoices (
-                cartao_id, ano_mes, valor_total, status, observacao
-            ) VALUES (?, ?, ?, ?, ?)
-            """,
-            (cartao_id, ano_mes, valor_total, status, observacao),
+            (valor_total, status, observacao, iid),
         )
-        return int(cur.lastrowid)
+        return iid
+    cur = conn.execute(
+        """
+        INSERT INTO card_invoices (
+            cartao_id, ano_mes, valor_total, status, observacao
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        (cartao_id, ano_mes, valor_total, status, observacao),
+    )
+    return int(cur.lastrowid)
+
+
+def upsert(
+    cartao_id: int,
+    ano_mes: str,
+    valor_total: float,
+    status: str = "aberta",
+    observacao: Optional[str] = None,
+) -> int:
+    with transaction() as conn:
+        return upsert_invoice_conn(
+            conn, cartao_id, ano_mes, valor_total, status, observacao
+        )
 
 
 def mark_paid(

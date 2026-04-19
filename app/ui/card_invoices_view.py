@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from app.services import accounts_service, card_invoices_service, cards_service
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.crud_page import CrudPage
+from app.ui.widgets.import_review_dialog import run_import_fatura_dialog
 from app.utils.formatting import format_currency, format_month_br
 
 
@@ -195,6 +196,10 @@ class CardInvoicesView(CrudPage):
         self.btn_add.setVisible(False)
         self.btn_edit.setText("Abrir fatura…")
         self.btn_edit.clicked.connect(self._open_selected)
+        self.btn_import = QPushButton("Importar fatura…")
+        self.btn_import.setToolTip("Importar CSV/OFX da fatura para o cartão e competência atuais.")
+        self.btn_import.clicked.connect(self._import_fatura)
+        self.toolbar_layout.insertWidget(2, self.btn_import)
         self.btn_delete.setVisible(False)
         self.table.doubleClicked.connect(lambda _: self._open_selected())
         self._by_card: dict[int, tuple[float, float, str]] = {}
@@ -271,6 +276,18 @@ class CardInvoicesView(CrudPage):
             f"Sugerido (visíveis): {format_currency(sug)}",
             f"Registrado (visíveis): {format_currency(reg)}",
         )
+
+    def _import_fatura(self) -> None:
+        cid = self.selected_id()
+        if cid is None:
+            QMessageBox.information(self, "Fatura", "Selecione um cartão na tabela.")
+            return
+        c = cards_service.get(cid)
+        nome = c.nome if c else "Cartão"
+        ym = getattr(self, "_ym", self.ano_mes())
+        if run_import_fatura_dialog(self, cid, nome, ym):
+            self.data_changed.emit()
+            self.reload()
 
     def _open_selected(self) -> None:
         cid = self.selected_id()

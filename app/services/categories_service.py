@@ -37,6 +37,19 @@ def get_by_name(nome: str) -> Optional[Category]:
     return Category.from_row(row) if row else None
 
 
+def default_category_id() -> int:
+    c = get_by_name("Outros")
+    if c is not None and c.id is not None:
+        return int(c.id)
+    with transaction() as conn:
+        row = conn.execute(
+            "SELECT id FROM categories WHERE ativo = 1 ORDER BY id LIMIT 1"
+        ).fetchone()
+    if row:
+        return int(row["id"])
+    raise RuntimeError("Nenhuma categoria disponível para importação")
+
+
 def create(cat: Category) -> int:
     with transaction() as conn:
         cur = conn.execute(

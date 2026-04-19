@@ -28,6 +28,7 @@ from app.services import accounts_service, cards_service
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
+from app.ui.widgets.import_review_dialog import run_import_extrato_dialog
 from app.utils.formatting import format_currency
 
 
@@ -176,10 +177,14 @@ class _AccountsCrud(CrudPage):
             "Registra um ajuste manual no livro-caixa (ex.: conciliação com extrato)."
         )
         self.btn_adjust.clicked.connect(self._adjust_balance)
+        self.btn_import = QPushButton("Importar extrato…")
+        self.btn_import.setToolTip("Importar OFX/CSV/XLSX e lançar na conta selecionada.")
+        self.btn_import.clicked.connect(self._import_extrato)
         adj_row = QWidget()
         adj_lay = QHBoxLayout(adj_row)
         adj_lay.setContentsMargins(0, 0, 0, 0)
         adj_lay.addWidget(self.btn_adjust)
+        adj_lay.addWidget(self.btn_import)
         adj_lay.addStretch()
         self.layout().insertWidget(2, adj_row)
 
@@ -233,6 +238,20 @@ class _AccountsCrud(CrudPage):
             ))
         self.model.set_rows(rows)
         self._refresh_kpi_cards()
+
+    def _import_extrato(self) -> None:
+        aid = self.selected_id()
+        if aid is None:
+            QMessageBox.information(
+                self, "Importar extrato", "Selecione uma conta na tabela."
+            )
+            return
+        acc = accounts_service.get(aid)
+        if acc is None:
+            return
+        if run_import_extrato_dialog(self, aid, acc.nome):
+            self.reload()
+            self.data_changed.emit()
 
     def _adjust_balance(self) -> None:
         aid = self.selected_id()
