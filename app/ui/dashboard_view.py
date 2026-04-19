@@ -58,7 +58,9 @@ class DashboardView(QWidget):
             "Fixos pendentes", subtitle="0 ativos · restante ano —", compact=True
         )
         self.card_assinaturas = KpiCard(
-            "Assinaturas", subtitle="0 ativas", compact=True
+            "Assinaturas",
+            subtitle="Total mensal (ativas)",
+            compact=True,
         )
 
         self.card_saldo_contas = KpiCard(
@@ -273,10 +275,17 @@ class DashboardView(QWidget):
             f"{format_currency(data.fixos_restante_ano)}"
         )
         self.card_assinaturas.set_value(
-            format_currency(data.assinaturas_ativas_valor)
+            format_currency(data.assinaturas_kpi_valor_mensal)
         )
         self.card_assinaturas.set_subtitle(
-            f"{data.assinaturas_ativas_qtd} ativas"
+            f"{data.assinaturas_kpi_qtd} ativas "
+            f"({data.assinaturas_kpi_em_conta_qtd} em conta · "
+            f"{data.assinaturas_kpi_no_cartao_qtd} no cartão)"
+        )
+        self.card_assinaturas.setToolTip(
+            "Soma do valor mensal de todas as assinaturas com status ativa. "
+            "No gasto previsto do mês, as debitadas em conta entram como linha de "
+            "assinaturas; as ligadas a cartão entram na fatura prevista do cartão."
         )
 
         self._fill_table(data.gastos_por_conta, self.tbl_contas)
@@ -292,7 +301,12 @@ class DashboardView(QWidget):
         if not rows:
             tbl.set_rows([], empty_message="Sem lançamentos no mês")
             return
-        tbl.set_rows([[label, format_currency(value)] for label, value in rows])
+        tbl.set_rows(
+            [[label, format_currency(value)] for label, value in rows],
+            sort_keys=[
+                [label.casefold(), float(value)] for label, value in rows
+            ],
+        )
 
     _VENC_TIPO = {
         "assinatura": "Assinatura",
@@ -318,5 +332,14 @@ class DashboardView(QWidget):
                     format_currency(ev.valor),
                 ]
                 for ev in rows
-            ]
+            ],
+            sort_keys=[
+                [
+                    ev.data,
+                    (self._VENC_TIPO.get(ev.tipo, ev.tipo) or "").casefold(),
+                    (ev.titulo or "").casefold(),
+                    float(ev.valor),
+                ]
+                for ev in rows
+            ],
         )

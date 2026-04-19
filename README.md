@@ -9,18 +9,25 @@ Roda 100% offline, com persistência local e interface nativa moderna.
   - Fluxo: renda mensal, gasto previsto no mês, margem de fluxo, saldos em contas e saldo fim do mês (est.)
   - Compromissos: investimentos, fixos pendentes, assinaturas
   - Tabela de **próximos vencimentos** (14 dias), gráfico anual e quebra por conta/forma de pagamento
-- **Renda**: múltiplas fontes de renda mensais com dia de recebimento e status ativa/inativa
-- **Contas e cartões**: cadastro base, com dia de pagamento da fatura por cartão
-- **Pagamentos**: CRUD com valor, descrição, data, conta, forma e observação
-- **Parcelamentos** (cartão de crédito): valor total, parcelas restantes, saldo devedor e status (ativo/quitado); vencimento da parcela segue o dia de pagamento da fatura do cartão
-- **Assinaturas** recorrentes: status ativa/pausada/cancelada, dia de cobrança, valor mensal
-- **Gastos fixos**: cadastro por competência, dia de vencimento e marcação de pago/pendente por mês
+- **Renda**: fontes **recorrentes**, **avulsas** e **parceladas** (com competência e marcação recebido/pendente por mês), dia de recebimento e status ativa/inativa
+- **Contas e cartões**: cadastro base, livro-caixa (`saldo_inicial` + movimentações), com dia de pagamento da fatura por cartão
+- **Categorias**: cadastro com cor e tipo sugerido; vínculo opcional em pagamentos, parcelamentos, assinaturas, fixos e investimentos
+- **Pagamentos**: CRUD com valor, descrição, data, conta/cartão, categoria, forma e observação
+- **Parcelamentos** (cartão de crédito): situação mensal (pago/pendente por competência); vencimento segue o dia de pagamento da fatura do cartão
+- **Assinaturas** recorrentes: status ativa/pausada/cancelada, dia de cobrança, valor mensal e situação mensal
+- **Gastos fixos**: cadastro com valor mensal, dia de vencimento e marcação de pago/pendente por mês (com valor efetivo opcional)
+- **Faturas de cartão**: competência por cartão, valor total, status e pagamento com conta
+- **Investimentos**: aplicações por conta, snapshots de valor ao longo do tempo e visão consolidada
 - **Calendário**: visão mensal com marcação dos dias que têm eventos (pagamentos, rendas, assinaturas, fixos e parcelas)
-- **Histórico** com tabela de transações + gráficos embedados (matplotlib):
-  - Gastos por mês (últimos 12 meses)
-  - Evolução da fatura por mês de referência
-  - Distribuição por categoria
-  - Projeção do saldo devedor
+- **Histórico e análises** com tabela de transações + gráficos embedados (matplotlib):
+  - **Renda vs despesa**
+  - **Fluxo acumulado**
+  - **Comprometimento %** (renda)
+  - **Custo de vida** (gastos por mês)
+  - **Evolução da fatura**
+  - **Categorias** (livro-caixa e custo de vida)
+  - **Saldo devedor** (parcelamentos)
+  - **Investimentos** (visão geral)
 
 ## Stack
 
@@ -28,9 +35,11 @@ Roda 100% offline, com persistência local e interface nativa moderna.
 - [PySide6](https://doc.qt.io/qtforpython-6/) (Qt 6)
 - SQLite (via `sqlite3` da stdlib)
 - [matplotlib](https://matplotlib.org/) (backend `QtAgg`)
+- [mplcursors](https://mplcursors.readthedocs.io/) (interação nos gráficos)
 - [Pillow](https://python-pillow.org/) (geração de ícones)
 - [Poetry](https://python-poetry.org/) para dependências
 - [PyInstaller](https://pyinstaller.org/) para empacotamento
+- **Dev**: [pytest](https://pytest.org/) e [pytest-qt](https://pytest-qt.readthedocs.io/) (grupo `dev` no Poetry)
 
 ## Estrutura
 
@@ -38,25 +47,32 @@ Roda 100% offline, com persistência local e interface nativa moderna.
 controlary/
 ├── app/
 │   ├── ui/              # QMainWindow, views e widgets reutilizáveis
-│   │   ├── widgets/     # card, chart_canvas, form_dialog, crud_page
+│   │   ├── widgets/     # card, chart_canvas, crud_page, form_dialog,
+│   │   │                # category_picker, readonly_table, payment_confirmation_dialog, wrapping_header
 │   │   ├── main_window.py
 │   │   ├── dashboard_view.py
-│   │   ├── income_sources_view.py   # fontes de renda
-│   │   ├── accounts_cards_view.py   # contas e cartões
+│   │   ├── income_sources_view.py
+│   │   ├── accounts_cards_view.py
+│   │   ├── categories_view.py
 │   │   ├── payments_view.py
 │   │   ├── installments_view.py
 │   │   ├── subscriptions_view.py
 │   │   ├── fixed_expenses_view.py
+│   │   ├── card_invoices_view.py
 │   │   ├── calendar_view.py
 │   │   ├── history_view.py
+│   │   ├── investments_view.py
 │   │   └── style.qss
-│   ├── models/          # Account, Card, IncomeSource, Payment,
-│   │                    # Installment, Subscription, FixedExpense
+│   ├── models/          # Account, Card, Category, Payment, Installment,
+│   │                    # Subscription, FixedExpense, IncomeSource,
+│   │                    # CardInvoice, Investment, …
 │   ├── database/        # connection.py, schema.sql, migrations.py
 │   ├── services/        # regras de negócio e queries agregadas
-│   │                    # (dashboard, calendar, pagamentos, etc.)
-│   ├── charts/          # funções que desenham em um Axes matplotlib
+│   ├── charts/          # funções plot(ax, …) matplotlib (renda_vs_despesa,
+│   │                    # category_month_views, …)
+│   ├── importers/       # reservado para importadores (ex.: banks/)
 │   └── utils/           # formatação, resolução de paths
+├── tests/               # pytest (dashboard, views, serviços)
 ├── assets/              # icon.png, icon.ico, icon.icns
 ├── build/
 │   ├── controle-financeiro.spec   # spec PyInstaller
@@ -84,6 +100,7 @@ O `Makefile` na raiz concentra os comandos do dia a dia. Rode `make help` para v
 | `make install`      | Instala dependências de runtime via Poetry (`poetry install --no-root`) |
 | `make install-all`  | Instala runtime + grupo `build` (inclui PyInstaller)                |
 | `make run`          | Roda o app localmente (`poetry run python main.py`)                 |
+| `make test`         | Roda a suíte pytest (`poetry install --with dev` se necessário)     |
 | `make icon`         | Gera os ícones placeholder em `assets/` (`.png`, `.ico`, `.icns`)   |
 | `make build-mac`    | Empacota o app para macOS (`dist/ControleFinanceiro.app`)           |
 | `make build-win`    | Empacota o app para Windows (`dist\ControleFinanceiro.exe`)         |
@@ -217,15 +234,19 @@ poetry run pyinstaller --noconfirm --windowed --name "ControleFinanceiro" ^
 
 Schema em [app/database/schema.sql](app/database/schema.sql). Tabelas principais:
 
-- `accounts(id, nome, observacao)` — contas bancárias cadastradas
-- `cards(id, nome, account_id, dia_pagamento_fatura, observacao)` — cartões com dia do vencimento da fatura (usado no cálculo da data das parcelas)
-- `income_sources(id, nome, valor_mensal, ativo, dia_recebimento, observacao)` — fontes de renda mensal
-- `payments(..., conta_id → accounts)` — pagamentos lançados
-- `installments(..., cartao_id → cards)` — parcelamentos no crédito
-- `subscriptions(..., account_id, card_id)` — vínculo opcional com conta **ou** cartão (nunca os dois)
-- `fixed_expenses(id, nome, valor, dia_referencia, ativo, observacao)` + `fixed_expense_payments(fixed_expense_id, ano_mes, pago_em)` — despesas fixas e marcação mensal de pagamento
+- `accounts(id, nome, observacao, saldo_inicial)` — contas; movimentações em **`account_transactions`** (`data`, `valor`, `origem`, **`transaction_key`** único para idempotência)
+- `categories(id, nome, tipo_sugerido, cor, ativo)` — categorias; **`category_id`** opcional em `payments`, `installments`, `subscriptions`, `fixed_expenses`, `investments`
+- `cards(id, nome, account_id, dia_pagamento_fatura, observacao)` — cartões e dia do vencimento da fatura
+- **`income_sources`**: `tipo` ∈ `recorrente` | `avulsa` | `parcelada`; `mes_referencia`, `total_parcelas`, `parcelas_recebidas` conforme o tipo; índice único de nome **apenas para não-avulsas** (avulsas podem repetir nome)
+- **`income_months`**: `(income_source_id, ano_mes)` com status recebido/pendente
+- `payments(..., conta_id, cartao_id, category_id, …)` — pagamentos lançados
+- `installments(..., cartao_id, category_id, …)` + **`installment_months`**: situação por competência
+- `subscriptions(..., account_id, card_id, category_id, …)` + **`subscription_months`**
+- `fixed_expenses(..., category_id, …)` + **`fixed_expense_months`** (incl. `valor_efetivo` opcional)
+- **`card_invoices`**: fatura por `(cartao_id, ano_mes)`, valor, status, conta de pagamento
+- **`investments`** + **`investment_snapshots`**: posições e histórico de valor
 
-Migrações incrementais em [app/database/migrations.py](app/database/migrations.py) garantem colunas novas (`dia_pagamento_fatura`, `dia_recebimento`, etc.) em bancos antigos.
+Migrações incrementais em [app/database/migrations.py](app/database/migrations.py) garantem compatibilidade com bancos antigos.
 
 Na primeira execução, cadastre contas e cartões em **Contas e cartões** antes de lançar pagamentos ou parcelamentos.
 
@@ -237,9 +258,8 @@ cp ~/.controle-financeiro/app.db ~/Desktop/app-backup-$(date +%Y%m%d).db
 
 ## Melhorias futuras
 
-- **Importação OFX/CSV** dos extratos bancários
+- **Importação OFX/CSV** dos extratos (estrutura reservada em `app/importers/`)
 - **Exportar** relatórios em CSV/PDF
-- **Categorização** configurável (tabela `categories` com cor e ícone)
 - **Múltiplas moedas** com conversão automática
 - **Backup automático** (rotação diária em `~/.controle-financeiro/backups/`)
 - **Modo escuro** (segunda QSS alternável)

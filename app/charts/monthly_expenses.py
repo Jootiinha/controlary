@@ -7,8 +7,8 @@ from typing import Dict
 from matplotlib.ticker import FuncFormatter
 
 from app.charts.plot_labels import annotate_bars
-from app.services import expense_totals_service
-from app.utils.formatting import format_currency, format_currency_short
+from app.services import dashboard_service, expense_totals_service
+from app.utils.formatting import current_month, format_currency, format_currency_short
 
 _MONTH_ABBR = (
     "jan",
@@ -47,7 +47,14 @@ def _label_ym(ym: str) -> str:
 
 def fetch_data(months: int = 6) -> Dict[str, float]:
     keys, _, _ = _rolling_month_keys(months)
-    return {k: expense_totals_service.total_despesa_mes(k) for k in keys}
+    ref = current_month()
+    out: Dict[str, float] = {}
+    for k in keys:
+        if k < ref:
+            out[k] = expense_totals_service.total_despesa_mes(k)
+        else:
+            out[k] = dashboard_service.previsto_mes_for(k)
+    return out
 
 
 def plot(ax) -> None:
@@ -84,7 +91,7 @@ def plot(ax) -> None:
 
     ax.set_title(
         "Custo de vida — últimos 6 meses\n"
-        "(saídas no livro-caixa + compras no cartão por competência)",
+        "(meses passados: realizado; mês atual: previsto — mesma fórmula do card «Gasto previsto no mês»)",
         fontsize=10,
         pad=10,
     )

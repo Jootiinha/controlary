@@ -276,6 +276,8 @@ class _MonthlyControl(QWidget):
         )
         self._rows: list[tuple[int, QComboBox]] = []
         self._monthly_hints: list[str] = []
+        self._hdr_sort_col: int | None = None
+        self._hdr_sort_order = Qt.SortOrder.AscendingOrder
 
         hint = QLabel(
             "Marque cada gasto fixo ativo como Pago na competência escolhida. "
@@ -339,8 +341,12 @@ class _MonthlyControl(QWidget):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             ),
             stretch_last_section=False,
+            sorting_enabled=False,
         )
 
+        self.tbl.horizontalHeader().sectionClicked.connect(
+            self._on_monthly_header_clicked
+        )
         self.tbl.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
         proj_title = QLabel("Projeção — meses restantes do ano (só pendentes)")
@@ -422,6 +428,18 @@ class _MonthlyControl(QWidget):
             else:
                 self.tbl.setRowHidden(i, needle not in self._monthly_hints[i])
 
+    def _on_monthly_header_clicked(self, logical_index: int) -> None:
+        if self._hdr_sort_col == logical_index:
+            self._hdr_sort_order = (
+                Qt.SortOrder.DescendingOrder
+                if self._hdr_sort_order == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+        else:
+            self._hdr_sort_col = logical_index
+            self._hdr_sort_order = Qt.SortOrder.AscendingOrder
+        self._reload_table()
+
     def _edit_row(self, row: int) -> None:
         if row < 0 or row >= len(self._rows):
             return
@@ -448,7 +466,37 @@ class _MonthlyControl(QWidget):
             due = _fixed_due_date_for_month(ym, fe.dia_referencia)
             return (0 if pago else 1, due.toJulianDay())
 
-        items = sorted(raw, key=sort_key)
+        def valor_efetivo_para_sort(fe: FixedExpense) -> float:
+            assert fe.id is not None
+            pr = fixed_expenses_service.is_paid(fe.id, ym)
+            ve = (
+                fixed_expenses_service.get_valor_efetivo(fe.id, ym) if pr else None
+            )
+            return float(ve) if ve is not None else float(fe.valor_mensal)
+
+        if self._hdr_sort_col is None:
+            items = sorted(raw, key=sort_key)
+        else:
+            col = self._hdr_sort_col
+            rev = self._hdr_sort_order == Qt.SortOrder.DescendingOrder
+
+            def hdr_key(fe: FixedExpense):
+                assert fe.id is not None
+                pr = fixed_expenses_service.is_paid(fe.id, ym)
+                if col == 0:
+                    return (pr, fe.nome.lower())
+                if col == 1:
+                    return (fe.nome.lower(),)
+                if col == 2:
+                    return (valor_efetivo_para_sort(fe),)
+                if col == 3:
+                    return (fe.dia_referencia,)
+                if col == 4:
+                    return (pr,)
+                return (0,)
+
+            items = sorted(raw, key=hdr_key, reverse=rev)
+
         self.tbl.setRowCount(len(items))
         for i, fe in enumerate(items):
             pago_row = fixed_expenses_service.is_paid(fe.id, ym)
@@ -549,10 +597,18 @@ class _MonthlyControl(QWidget):
         self._refresh_monthly_kpis()
         self._apply_monthly_search()
 
+        hdr = self.tbl.horizontalHeader()
+        if self._hdr_sort_col is not None:
+            hdr.setSortIndicatorShown(True)
+            hdr.setSortIndicator(self._hdr_sort_col, self._hdr_sort_order)
+        else:
+            hdr.setSortIndicatorShown(False)
+
     def _reload_projection(self) -> None:
         data = fixed_expenses_service.projection_by_month_rest_of_year()
         self.tbl_proj.set_rows(
-            [[format_month_br(ym), format_currency(total)] for ym, total in data]
+            [[format_month_br(ym), format_currency(total)] for ym, total in data],
+            sort_keys=[[ym, float(total)] for ym, total in data],
         )
 
     def reload_all(self) -> None:

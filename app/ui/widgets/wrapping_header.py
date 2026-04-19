@@ -84,6 +84,17 @@ class WrappingHeaderView(QHeaderView):
         )
         painter.restore()
 
+        if self.isSortIndicatorShown() and self.sortIndicatorSection() == logical_index:
+            arrow_opt = QStyleOptionHeader()
+            self.initStyleOptionForIndex(arrow_opt, logical_index)
+            arrow_opt.rect = rect
+            self.style().drawPrimitive(
+                QStyle.PrimitiveElement.PE_IndicatorHeaderArrow,
+                arrow_opt,
+                painter,
+                self,
+            )
+
     def sectionSizeFromContents(self, logical_index: int) -> QSize:
         model = self.model()
         text = ""

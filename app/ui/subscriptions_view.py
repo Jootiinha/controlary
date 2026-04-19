@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QDate, Signal
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -326,6 +326,8 @@ class _SubscriptionMonthlyControl(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._hdr_sort_col: int | None = None
+        self._hdr_sort_order = Qt.SortOrder.AscendingOrder
         hint = QLabel(
             "Assinaturas ativas debitadas em conta corrente. "
             "Marque como Pago quando o débito ocorrer no mês selecionado."
@@ -343,11 +345,27 @@ class _SubscriptionMonthlyControl(QWidget):
         row.addStretch()
         self.tbl = ReadOnlyTable(
             ["Nome", "Valor", "Conta", "Situação no mês"],
+            sorting_enabled=False,
+        )
+        self.tbl.horizontalHeader().sectionClicked.connect(
+            self._on_monthly_header_clicked
         )
         lay = QVBoxLayout(self)
         lay.addWidget(hint)
         lay.addLayout(row)
         lay.addWidget(self.tbl, 1)
+        self.reload_table()
+
+    def _on_monthly_header_clicked(self, logical_index: int) -> None:
+        if self._hdr_sort_col == logical_index:
+            self._hdr_sort_order = (
+                Qt.SortOrder.DescendingOrder
+                if self._hdr_sort_order == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+        else:
+            self._hdr_sort_col = logical_index
+            self._hdr_sort_order = Qt.SortOrder.AscendingOrder
         self.reload_table()
 
     def ano_mes(self) -> str:
@@ -361,6 +379,27 @@ class _SubscriptionMonthlyControl(QWidget):
             for s in subscriptions_service.list_all()
             if s.status == "ativa" and s.account_id is not None and s.id is not None
         ]
+        if self._hdr_sort_col is not None:
+            col = self._hdr_sort_col
+            rev = self._hdr_sort_order == Qt.SortOrder.DescendingOrder
+
+            def hdr_key(s: Subscription):
+                assert s.id is not None
+                acc = accounts_service.get(int(s.account_id))
+                cn = (acc.nome if acc else "—").lower()
+                pg = subscription_months_service.is_paid(s.id, ym)
+                if col == 0:
+                    return (s.nome.lower(),)
+                if col == 1:
+                    return (float(s.valor_mensal),)
+                if col == 2:
+                    return (cn,)
+                if col == 3:
+                    return (pg,)
+                return (0,)
+
+            items = sorted(items, key=hdr_key, reverse=rev)
+
         self.tbl.setRowCount(len(items))
         for i, s in enumerate(items):
             assert s.id is not None
@@ -395,6 +434,13 @@ class _SubscriptionMonthlyControl(QWidget):
 
             cb.currentIndexChanged.connect(make_handler(sid, cb, ym))
             self.tbl.setCellWidget(i, 3, cb)
+
+        hdr = self.tbl.horizontalHeader()
+        if self._hdr_sort_col is not None:
+            hdr.setSortIndicatorShown(True)
+            hdr.setSortIndicator(self._hdr_sort_col, self._hdr_sort_order)
+        else:
+            hdr.setSortIndicatorShown(False)
 
 
 class SubscriptionsView(QWidget):

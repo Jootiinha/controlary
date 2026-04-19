@@ -243,6 +243,11 @@ def upcoming_payables(horizon_days: int = UPCOMING_HORIZON_DAYS) -> list[Calenda
     out: list[CalendarEvent] = []
     for y, m in _months_from_until(today, end):
         for ev in events_for_month(y, m):
+            if ev.tipo == "pagamento":
+                if ev.data < today or ev.data > end:
+                    continue
+                out.append(ev)
+                continue
             if ev.tipo not in ("assinatura", "fixo", "parcela", "fatura"):
                 continue
             if ev.data < today or ev.data > end:

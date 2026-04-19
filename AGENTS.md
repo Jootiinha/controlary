@@ -25,6 +25,7 @@ Sem Makefile:
 ```bash
 poetry install && poetry run python main.py
 poetry run python -m compileall -q app main.py
+poetry install --with dev --no-root && poetry run pytest tests/
 ```
 
 Testes automatizados: `make test` (BD SQLite temporária via `CONTROLE_FINANCEIRO_DB`). `make check` continua sendo a validação mínima de sintaxe antes de concluir tarefas que toquem em `.py`.
@@ -41,6 +42,8 @@ main.py
                       └─ app/database/connection.py  (sqlite3, transaction())
 ```
 
+`app/importers/` está reservado para importadores futuros (ex.: OFX/CSV por banco).
+
 Regras:
 
 - **Views (`app/ui/*_view.py`)** chamam apenas `services/`. Nunca importe `sqlite3` nem acesse `connection` em view.
@@ -48,7 +51,7 @@ Regras:
 - **Models** são `@dataclass` simples com `from_row` para construir a partir de `sqlite3.Row`.
 - **Formatação** (moeda, datas, mês) vive em `app/utils/formatting.py`. Nunca formate `R$` ou datas dentro de view/service — importe utilitários.
 - **Gráficos** (matplotlib) vivem em `app/charts/` como funções `plot(ax, ...)` embutidas via `ChartCanvas`.
-- **Estilo Qt**: usar `app/ui/style.qss` e widgets reutilizáveis em `app/ui/widgets/` (`KpiCard`, `ChartCanvas`, `CrudPage`, `FormDialog`).
+- **Estilo Qt**: usar `app/ui/style.qss` e widgets reutilizáveis em `app/ui/widgets/` (`KpiCard`, `ChartCanvas`, `CrudPage`, `FormDialog`, `CategoryPicker`, `ReadOnlyTable`, `PaymentConfirmationDialog`, `WrappingHeader`).
 
 ## Migrações de schema
 
@@ -87,7 +90,8 @@ def _migrate_cards_dia_pagamento_fatura(conn) -> None:
 ## Dados e datas
 
 - Todas as datas são `datetime.date` em Python e `TEXT` ISO (`YYYY-MM-DD`) no SQLite. Use `date(col)` em filtros SQL.
-- Mês de referência é string `YYYY-MM` (ex.: `fixed_expense_payments.ano_mes`).
+- Mês de referência é string `YYYY-MM` (ex.: `fixed_expense_months.ano_mes`, `income_months.ano_mes`).
+- Em `income_sources`, `tipo` ∈ `recorrente` | `avulsa` | `parcelada`. O índice único de nome é **parcial** (`WHERE tipo <> 'avulsa'`): rendas avulsas podem repetir o mesmo nome.
 - Ao projetar um "dia do mês" (ex.: `dia_recebimento`, `dia_pagamento_fatura`) que não existe no mês alvo, use o **último dia do mês** (helper `_ultimo_dia_mes` em `calendar_service.py`).
 - Moeda é `float` em reais; formate sempre via `format_currency`.
 
@@ -118,5 +122,9 @@ def _migrate_cards_dia_pagamento_fatura(conn) -> None:
 - Schema e migrações: `app/database/schema.sql`, `app/database/migrations.py`
 - Regras agregadas do dashboard: `app/services/dashboard_service.py`
 - Projeção de eventos (calendário e próximos vencimentos): `app/services/calendar_service.py`
+- Faturas de cartão: `app/services/card_invoices_service.py`
+- Investimentos: `app/services/investments_service.py`
+- Situação mensal (renda, parcelas, assinaturas): `app/services/income_months_service.py`, `app/services/installment_months_service.py`, `app/services/subscription_months_service.py`
 - Widgets reutilizáveis: `app/ui/widgets/`
+- Testes automatizados: `tests/` (`make test`)
 - Ponto de entrada: `main.py`

@@ -41,6 +41,7 @@ def test_load_dashboard_totals_and_breakdown(test_db_path: Path) -> None:
     assert data.margem_apos_gasto == 4950.0
     assert data.gastos_por_conta == [("Conta A", 50.0)]
     assert data.gastos_por_forma == [("Pix", 50.0)]
+    assert dashboard_service.previsto_mes_for(REF_MONTH) == data.previsto_mes
 
 
 def test_load_empty_database(test_db_path: Path) -> None:
@@ -51,3 +52,38 @@ def test_load_empty_database(test_db_path: Path) -> None:
     assert data.renda_mensal_total == 0.0
     assert data.gastos_por_conta == []
     assert data.gastos_por_forma == []
+
+
+def test_dashboard_kpi_assinaturas_inclui_cartao_previsto_so_conta(test_db_path: Path) -> None:
+    """KPI mostra todas as ativas; a parcela de assinaturas no previsto continua só em conta."""
+    _seed_sample_data()
+    with transaction() as conn:
+        conn.execute("INSERT INTO cards (nome, account_id) VALUES ('Visa', 1)")
+        conn.execute(
+            """
+            INSERT INTO subscriptions (
+                nome, categoria, valor_mensal, dia_cobranca, forma_pagamento,
+                conta_cartao, account_id, card_id, status
+            ) VALUES ('Netflix conta', 'x', 10.0, 5, 'Débito', NULL, 1, NULL, 'ativa')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO subscriptions (
+                nome, categoria, valor_mensal, dia_cobranca, forma_pagamento,
+                conta_cartao, account_id, card_id, status
+            ) VALUES ('Spotify cartão', 'x', 20.0, 10, 'Cartão', NULL, NULL, 1, 'ativa')
+            """
+        )
+
+    data = dashboard_service.load(mes=REF_MONTH)
+
+    assert data.assinaturas_ativas_valor == 10.0
+    assert data.assinaturas_ativas_qtd == 1
+    assert data.assinaturas_kpi_valor_mensal == 30.0
+    assert data.assinaturas_kpi_qtd == 2
+    assert data.assinaturas_kpi_em_conta_qtd == 1
+    assert data.assinaturas_kpi_no_cartao_qtd == 1
+    # previsto: fatura sugerida (20) + assinatura em conta (10) + avulso em conta (50)
+    assert data.previsto_faturas == 20.0
+    assert data.previsto_mes == 80.0

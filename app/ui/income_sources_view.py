@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
-from PySide6.QtCore import QDate, Signal
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -492,6 +492,8 @@ class _IncomeMonthlyControl(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._hdr_sort_col: int | None = None
+        self._hdr_sort_order = Qt.SortOrder.AscendingOrder
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -519,11 +521,27 @@ class _IncomeMonthlyControl(QWidget):
                 QSizePolicy.Policy.Expanding,
                 QSizePolicy.Policy.Expanding,
             ),
+            sorting_enabled=False,
+        )
+        self.tbl.horizontalHeader().sectionClicked.connect(
+            self._on_monthly_header_clicked
         )
         lay = QVBoxLayout(self)
         lay.addWidget(hint)
         lay.addLayout(row)
         lay.addWidget(self.tbl, 1)
+        self.reload_table()
+
+    def _on_monthly_header_clicked(self, logical_index: int) -> None:
+        if self._hdr_sort_col == logical_index:
+            self._hdr_sort_order = (
+                Qt.SortOrder.DescendingOrder
+                if self._hdr_sort_order == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+        else:
+            self._hdr_sort_col = logical_index
+            self._hdr_sort_order = Qt.SortOrder.AscendingOrder
         self.reload_table()
 
     def ano_mes(self) -> str:
@@ -539,6 +557,27 @@ class _IncomeMonthlyControl(QWidget):
             and s.id is not None
             and income_sources_service.applies_to_month(s, ym)
         ]
+        if self._hdr_sort_col is not None:
+            col = self._hdr_sort_col
+            rev = self._hdr_sort_order == Qt.SortOrder.DescendingOrder
+
+            def hdr_key(s: IncomeSource):
+                assert s.id is not None
+                acc = accounts_service.get(int(s.account_id))
+                cn = (acc.nome if acc else "—").lower()
+                rec = income_months_service.is_received(s.id, ym)
+                if col == 0:
+                    return (s.nome.lower(),)
+                if col == 1:
+                    return (float(s.valor_mensal),)
+                if col == 2:
+                    return (cn,)
+                if col == 3:
+                    return (rec,)
+                return (0,)
+
+            items = sorted(items, key=hdr_key, reverse=rev)
+
         self.tbl.setRowCount(len(items))
         for i, s in enumerate(items):
             assert s.id is not None
@@ -573,6 +612,13 @@ class _IncomeMonthlyControl(QWidget):
 
             cb.currentIndexChanged.connect(make_handler(sid, cb, ym))
             self.tbl.setCellWidget(i, 3, cb)
+
+        hdr = self.tbl.horizontalHeader()
+        if self._hdr_sort_col is not None:
+            hdr.setSortIndicatorShown(True)
+            hdr.setSortIndicator(self._hdr_sort_col, self._hdr_sort_order)
+        else:
+            hdr.setSortIndicatorShown(False)
 
 
 class IncomeSourcesView(QWidget):

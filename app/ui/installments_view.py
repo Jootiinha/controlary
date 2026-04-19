@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QDate, Signal
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -325,6 +325,8 @@ class _InstallmentMonthlyControl(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._hdr_sort_col: int | None = None
+        self._hdr_sort_order = Qt.SortOrder.AscendingOrder
         hint = QLabel(
             "Parcelamentos à vista na conta: cada linha é um mês do plano a partir do mês de referência "
             "até o último da compra. Marque Pago quando debitar a parcela nessa competência."
@@ -342,11 +344,27 @@ class _InstallmentMonthlyControl(QWidget):
         row.addStretch()
         self.tbl = ReadOnlyTable(
             ["Nome", "Valor parcela", "Conta", "Mês ref.", "Situação no mês"],
+            sorting_enabled=False,
+        )
+        self.tbl.horizontalHeader().sectionClicked.connect(
+            self._on_monthly_header_clicked
         )
         lay = QVBoxLayout(self)
         lay.addWidget(hint)
         lay.addLayout(row)
         lay.addWidget(self.tbl, 1)
+        self.reload_table()
+
+    def _on_monthly_header_clicked(self, logical_index: int) -> None:
+        if self._hdr_sort_col == logical_index:
+            self._hdr_sort_order = (
+                Qt.SortOrder.DescendingOrder
+                if self._hdr_sort_order == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+        else:
+            self._hdr_sort_col = logical_index
+            self._hdr_sort_order = Qt.SortOrder.AscendingOrder
         self.reload_table()
 
     def ano_mes(self) -> str:
@@ -364,6 +382,29 @@ class _InstallmentMonthlyControl(QWidget):
             and ym in competencias_parcelada(i.mes_referencia, i.total_parcelas)
             and i.id is not None
         ]
+        if self._hdr_sort_col is not None:
+            col = self._hdr_sort_col
+            rev = self._hdr_sort_order == Qt.SortOrder.DescendingOrder
+
+            def hdr_key(inst: Installment):
+                assert inst.id is not None
+                acc = accounts_service.get(int(inst.account_id))
+                cn = (acc.nome if acc else "—").lower()
+                pg = installment_months_service.is_paid(inst.id, ym)
+                if col == 0:
+                    return (inst.nome_fatura.lower(),)
+                if col == 1:
+                    return (float(inst.valor_parcela),)
+                if col == 2:
+                    return (cn,)
+                if col == 3:
+                    return (inst.mes_referencia,)
+                if col == 4:
+                    return (pg,)
+                return (0,)
+
+            items = sorted(items, key=hdr_key, reverse=rev)
+
         self.tbl.setRowCount(len(items))
         for i, inst in enumerate(items):
             assert inst.id is not None
@@ -402,6 +443,13 @@ class _InstallmentMonthlyControl(QWidget):
 
             cb.currentIndexChanged.connect(make_handler(iid, cb, ym))
             self.tbl.setCellWidget(i, 4, cb)
+
+        hdr = self.tbl.horizontalHeader()
+        if self._hdr_sort_col is not None:
+            hdr.setSortIndicatorShown(True)
+            hdr.setSortIndicator(self._hdr_sort_col, self._hdr_sort_order)
+        else:
+            hdr.setSortIndicatorShown(False)
 
 
 class InstallmentsView(QWidget):

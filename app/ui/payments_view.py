@@ -58,6 +58,13 @@ class PaymentDialog(FormDialog):
         self.ed_data.setCalendarPopup(True)
         self.ed_data.setDate(QDate.currentDate())
 
+        self.lbl_data_hint = QLabel(
+            "Em conta: data futura aparece no calendário e em “Próximos vencimentos”; "
+            "o saldo só considera esse débito a partir dessa data."
+        )
+        self.lbl_data_hint.setWordWrap(True)
+        self.lbl_data_hint.setStyleSheet("color: #6B7280;")
+
         self.cmb_origem = QComboBox()
         self.cmb_origem.setEditable(False)
         self._fill_origem()
@@ -78,6 +85,7 @@ class PaymentDialog(FormDialog):
         self.form.addRow("Descrição *", self.ed_descricao)
         self.form.addRow("Valor *", self.ed_valor)
         self.form.addRow("Data *", self.ed_data)
+        self.form.addRow("", self.lbl_data_hint)
         self.form.addRow("Origem *", self.cmb_origem)
         self.form.addRow("", self.lbl_origem)
         self.form.addRow("Categoria *", self._picker_cat)

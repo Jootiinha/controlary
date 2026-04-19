@@ -3,7 +3,14 @@ from __future__ import annotations
 
 from typing import List
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QCollator,
+    QLocale,
+    QModelIndex,
+    QSortFilterProxyModel,
+    Qt,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -19,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.widgets.wrapping_header import WrappingHeaderView
+from app.utils.formatting import compare_sort_display_values
 
 
 class SimpleTableModel(QAbstractTableModel):
@@ -91,6 +99,20 @@ class _MultiColumnFilterProxyModel(QSortFilterProxyModel):
                 return True
         return False
 
+    def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
+        model = self.sourceModel()
+        if model is None:
+            return super().lessThan(left, right)
+        if left.column() != right.column():
+            return super().lessThan(left, right)
+        a = str(model.data(left, Qt.DisplayRole) or "").strip()
+        b = str(model.data(right, Qt.DisplayRole) or "").strip()
+        cmp = compare_sort_display_values(a, b)
+        if cmp is not None:
+            return cmp < 0
+        collator = QCollator(QLocale(QLocale.Portuguese, QLocale.Brazil))
+        return collator.compare(a, b) < 0
+
 
 class CrudPage(QWidget):
     """Widget base com header e tabela. Subclasses implementam ações."""
@@ -146,6 +168,8 @@ class CrudPage(QWidget):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
+        self.table.setSortingEnabled(True)
+        self.table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
 
         self.totals_wrap = QWidget()
         self.totals_bar = QHBoxLayout(self.totals_wrap)
