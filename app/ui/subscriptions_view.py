@@ -3,9 +3,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QDate, Qt, Signal
+from PySide6.QtCore import QDate, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QComboBox,
     QDateEdit,
     QDoubleSpinBox,
@@ -17,7 +16,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QTabWidget,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -34,6 +32,7 @@ from app.ui.categories_view import CategoryDialog
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.category_picker import CategoryPicker
 from app.ui.widgets.crud_page import CrudPage
+from app.ui.widgets.readonly_table import ReadOnlyTable
 from app.ui.widgets.form_dialog import FormDialog
 from app.utils.formatting import format_currency
 
@@ -342,13 +341,9 @@ class _SubscriptionMonthlyControl(QWidget):
         self.dt.dateChanged.connect(self.reload_table)
         row.addWidget(self.dt)
         row.addStretch()
-        self.tbl = QTableWidget(0, 4)
-        self.tbl.setHorizontalHeaderLabels(
-            ["Nome", "Valor", "Conta", "Situação no mês"]
+        self.tbl = ReadOnlyTable(
+            ["Nome", "Valor", "Conta", "Situação no mês"],
         )
-        self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tbl.setSelectionMode(QAbstractItemView.NoSelection)
-        self.tbl.verticalHeader().setVisible(False)
         lay = QVBoxLayout(self)
         lay.addWidget(hint)
         lay.addLayout(row)
@@ -367,20 +362,18 @@ class _SubscriptionMonthlyControl(QWidget):
             if s.status == "ativa" and s.account_id is not None and s.id is not None
         ]
         self.tbl.setRowCount(len(items))
-        align_left = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
-        align_val = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
         for i, s in enumerate(items):
             assert s.id is not None
             sid = s.id
             it_n = QTableWidgetItem(s.nome)
-            it_n.setTextAlignment(align_left)
+            it_n.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
             self.tbl.setItem(i, 0, it_n)
             it_v = QTableWidgetItem(format_currency(s.valor_mensal))
-            it_v.setTextAlignment(align_val)
+            it_v.setTextAlignment(ReadOnlyTable.ALIGN_RIGHT)
             self.tbl.setItem(i, 1, it_v)
             acc = accounts_service.get(int(s.account_id))
             it_c = QTableWidgetItem(acc.nome if acc else "—")
-            it_c.setTextAlignment(align_left)
+            it_c.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
             self.tbl.setItem(i, 2, it_c)
             cb = QComboBox()
             cb.addItems(["Pendente", "Pago"])

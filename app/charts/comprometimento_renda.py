@@ -1,4 +1,4 @@
-"""Percentual: gastos em pagamentos / renda mensal (ativas) por mês."""
+"""Percentual: despesas (caixa + cartão) / renda esperada do mês."""
 from __future__ import annotations
 
 import numpy as np
@@ -31,7 +31,7 @@ def plot(ax) -> None:
     ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=8)
     ax.set_ylabel("% da renda")
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.0f}%"))
-    ax.set_title("Comprometimento: gastos / renda mensal")
+    ax.set_title("Comprometimento: despesas / renda do mês")
     ax.set_ylim(0, max(pct + [5]) * 1.1)
     ax.grid(True, axis="y", alpha=0.25)
 

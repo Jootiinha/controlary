@@ -8,6 +8,23 @@ from app.database.connection import transaction
 from app.services import accounts_service
 
 
+def count_received(income_source_id: int, ano_meses) -> int:
+    meses = tuple(ano_meses)
+    if not meses:
+        return 0
+    placeholders = ",".join("?" * len(meses))
+    with transaction() as conn:
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS n FROM income_months
+             WHERE income_source_id = ? AND status = 'recebido'
+               AND ano_mes IN ({placeholders})
+            """,
+            (income_source_id, *meses),
+        ).fetchone()
+    return int(row["n"]) if row else 0
+
+
 def is_received(income_source_id: int, ano_mes: str) -> bool:
     with transaction() as conn:
         row = conn.execute(
@@ -26,7 +43,7 @@ def set_month_status(income_source_id: int, ano_mes: str, recebido: bool) -> Non
     with transaction() as conn:
         src = conn.execute(
             """
-            SELECT valor_mensal, account_id, dia_recebimento, ativo
+            SELECT valor_mensal, account_id, dia_recebimento
               FROM income_sources
              WHERE id = ?
             """,
@@ -43,7 +60,7 @@ def set_month_status(income_source_id: int, ano_mes: str, recebido: bool) -> Non
 
         if not recebido:
             accounts_service.remove_transaction_key(key, conn=conn)
-        elif not was_rec and src and src["account_id"] and src["ativo"]:
+        elif not was_rec and src and src["account_id"]:
             y, m = map(int, ano_mes.split("-"))
             dia = min(int(src["dia_recebimento"] or 5), monthrange(y, m)[1])
             data = f"{y:04d}-{m:02d}-{dia:02d}"
@@ -81,3 +98,26 @@ def set_month_status(income_source_id: int, ano_mes: str, recebido: bool) -> Non
                 """,
                 (income_source_id, ano_mes, status, rec_em),
             )
+
+
+def delete_rows_not_in(income_source_id: int, keep: set[str]) -> None:
+    with transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT ano_mes FROM income_months
+             WHERE income_source_id = ?
+            """,
+            (income_source_id,),
+        ).fetchall()
+        for r in rows:
+            ym = r["ano_mes"]
+            if ym not in keep:
+                key = accounts_service.transaction_key_income(income_source_id, ym)
+                accounts_service.remove_transaction_key(key, conn=conn)
+                conn.execute(
+                    """
+                    DELETE FROM income_months
+                     WHERE income_source_id = ? AND ano_mes = ?
+                    """,
+                    (income_source_id, ym),
+                )

@@ -1,15 +1,32 @@
-"""Custo de vida: soma dos lançamentos por mês (últimos 12 meses)."""
+"""Custo de vida: total agregado por mês (últimos 6 meses)."""
 from __future__ import annotations
 
 from datetime import date
 from typing import Dict
 
-from app.database.connection import transaction
+from matplotlib.ticker import FuncFormatter
+
 from app.charts.plot_labels import annotate_bars
+from app.services import expense_totals_service
+from app.utils.formatting import format_currency, format_currency_short
+
+_MONTH_ABBR = (
+    "jan",
+    "fev",
+    "mar",
+    "abr",
+    "mai",
+    "jun",
+    "jul",
+    "ago",
+    "set",
+    "out",
+    "nov",
+    "dez",
+)
 
 
 def _rolling_month_keys(months: int) -> tuple[list[str], str, str]:
-    """Meses calendário consecutivos do mais antigo ao mais recente (últimos ``months``)."""
     today = date.today()
     y, m = today.year, today.month
     newest_first: list[str] = []
@@ -23,36 +40,64 @@ def _rolling_month_keys(months: int) -> tuple[list[str], str, str]:
     return chronological, chronological[0], chronological[-1]
 
 
-def fetch_data(months: int = 12) -> Dict[str, float]:
-    """Soma **todos** os lançamentos em ``payments`` no mês (cartão e conta)."""
-    keys, first_ym, last_ym = _rolling_month_keys(months)
-    with transaction() as conn:
-        rows = conn.execute(
-            """
-            SELECT substr(data, 1, 7) AS mes, COALESCE(SUM(valor), 0) AS total
-              FROM payments
-             WHERE substr(data, 1, 7) BETWEEN ? AND ?
-             GROUP BY mes
-            """,
-            (first_ym, last_ym),
-        ).fetchall()
+def _label_ym(ym: str) -> str:
+    y, mo = map(int, ym.split("-"))
+    return f"{_MONTH_ABBR[mo - 1]}/{y % 100:02d}"
 
-    dados = {r["mes"]: float(r["total"] or 0) for r in rows}
-    return {k: dados.get(k, 0.0) for k in keys}
+
+def fetch_data(months: int = 6) -> Dict[str, float]:
+    keys, _, _ = _rolling_month_keys(months)
+    return {k: expense_totals_service.total_despesa_mes(k) for k in keys}
 
 
 def plot(ax) -> None:
     data = fetch_data()
-    meses = list(data.keys())
+    meses_keys = list(data.keys())
     valores = list(data.values())
-    bars = ax.bar(meses, valores, color="#4C8BF5")
-    annotate_bars(ax, bars, valores, fontsize=7, dy=3)
+    labels = [_label_ym(k) for k in meses_keys]
+    x = list(range(len(valores)))
+    bars = ax.bar(x, valores, color="#4C8BF5", zorder=3)
+    annotate_bars(
+        ax,
+        bars,
+        valores,
+        fontsize=8,
+        dy=3,
+        format_value=format_currency_short,
+    )
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=8, rotation=0, ha="center")
+    ax.tick_params(axis="x", pad=2)
+
+    avg_window = sum(valores) / len(valores) if valores else 0.0
+    ax.axhline(
+        avg_window,
+        color="#059669",
+        linestyle=(0, (4, 4)),
+        linewidth=1.2,
+        label=f"Média período · {format_currency(avg_window)}",
+        zorder=2,
+    )
+    leg = ax.legend(loc="upper left", fontsize=8, framealpha=0.95, edgecolor="#E5E7EB")
+    if leg is not None:
+        leg.get_frame().set_linewidth(0.8)
+
     ax.set_title(
-        "Custo de vida por mês — últimos 12 meses\n(todos os lançamentos: cartão e conta)",
+        "Custo de vida — últimos 6 meses\n"
+        "(saídas no livro-caixa + compras no cartão por competência)",
         fontsize=10,
         pad=10,
     )
-    ax.set_ylabel("R$")
-    ax.tick_params(axis="x", rotation=45)
-    for label in ax.get_xticklabels():
-        label.set_ha("right")
+    ax.yaxis.set_major_formatter(
+        FuncFormatter(lambda v, _: format_currency_short(v))
+    )
+    y_all = list(valores) + [avg_window]
+    top = max(y_all) if y_all else 0.0
+    bottom = min(0.0, min(y_all) if y_all else 0.0)
+    span = top - bottom
+    if span <= 0:
+        span = 1.0
+    ax.set_ylim(bottom, bottom + span * 1.28)
+    ax.margins(x=0.02)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)

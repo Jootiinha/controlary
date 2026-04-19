@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from datetime import date
 
+from matplotlib.ticker import FuncFormatter
+
 from app.charts.plot_labels import annotate_line_points
 from app.services import installments_service
+from app.utils.formatting import format_currency_short
 
 
 def _shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
@@ -41,7 +44,9 @@ def plot(ax) -> None:
     ax.fill_between(meses, valores, alpha=0.15, color="#DC2626")
     annotate_line_points(ax, meses, valores, fontsize=7, dy=7)
     ax.set_title("Projeção do saldo devedor (próximos 12 meses)")
-    ax.set_ylabel("R$")
+    ax.yaxis.set_major_formatter(
+        FuncFormatter(lambda v, _: format_currency_short(v))
+    )
     ax.tick_params(axis="x", rotation=45)
     for label in ax.get_xticklabels():
         label.set_ha("right")

@@ -33,7 +33,7 @@ def annotate_bars(
             ha="center",
             va="bottom",
             fontsize=fontsize,
-            clip_on=True,
+            clip_on=False,
         )
 
 

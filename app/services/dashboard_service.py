@@ -46,6 +46,105 @@ class DashboardData:
     saldo_projetado_fim_mes: float = 0.0
 
 
+def cost_of_living(ano_mes: str) -> float:
+    """Custo total do mês: avulsos em conta, faturas de cartão (sem somar compras duas vezes),
+    parcelas em conta, assinaturas em conta e gastos fixos ativos."""
+    with transaction() as conn:
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(valor), 0) AS t
+              FROM payments
+             WHERE substr(data, 1, 7) = ?
+               AND cartao_id IS NULL
+            """,
+            (ano_mes,),
+        ).fetchone()
+        avulsos_conta = float(row["t"] or 0)
+
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(valor_mensal), 0) AS t
+              FROM subscriptions
+             WHERE status = 'ativa'
+               AND card_id IS NULL
+            """
+        ).fetchone()
+        assinaturas_conta = float(row["t"] or 0)
+
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(valor_parcela), 0) AS t
+              FROM installments
+             WHERE status = 'ativo'
+               AND cartao_id IS NULL
+               AND mes_referencia = ?
+            """,
+            (ano_mes,),
+        ).fetchone()
+        parcelas_conta = float(row["t"] or 0)
+
+        row = conn.execute(
+            "SELECT COALESCE(SUM(valor_mensal), 0) AS t FROM fixed_expenses WHERE ativo = 1"
+        ).fetchone()
+        fixos = float(row["t"] or 0)
+
+        faturas_cartao = 0.0
+        for cr in conn.execute("SELECT id FROM cards").fetchall():
+            cid = int(cr["id"])
+            inv = conn.execute(
+                """
+                SELECT COALESCE(valor_total, 0) AS vt
+                  FROM card_invoices
+                 WHERE cartao_id = ? AND ano_mes = ?
+                """,
+                (cid, ano_mes),
+            ).fetchone()
+            vt = float(inv["vt"]) if inv else 0.0
+            if vt > 0:
+                faturas_cartao += vt
+                continue
+            r1 = conn.execute(
+                """
+                SELECT COALESCE(SUM(valor_parcela), 0) AS t
+                  FROM installments
+                 WHERE status = 'ativo'
+                   AND cartao_id = ?
+                   AND mes_referencia = ?
+                """,
+                (cid, ano_mes),
+            ).fetchone()
+            r2 = conn.execute(
+                """
+                SELECT COALESCE(SUM(valor_mensal), 0) AS t
+                  FROM subscriptions
+                 WHERE status = 'ativa'
+                   AND card_id = ?
+                """,
+                (cid,),
+            ).fetchone()
+            r3 = conn.execute(
+                """
+                SELECT COALESCE(SUM(valor), 0) AS t
+                  FROM payments
+                 WHERE cartao_id = ?
+                   AND substr(data, 1, 7) = ?
+                """,
+                (cid, ano_mes),
+            ).fetchone()
+            v = float(r1["t"] or 0) + float(r2["t"] or 0) + float(r3["t"] or 0)
+            if v > 0:
+                faturas_cartao += v
+
+        total = (
+            avulsos_conta
+            + assinaturas_conta
+            + parcelas_conta
+            + fixos
+            + faturas_cartao
+        )
+        return round(total, 2)
+
+
 def load(mes: str | None = None) -> DashboardData:
     mes = mes or current_month()
     data = DashboardData(mes_referencia=mes)
@@ -131,7 +230,7 @@ def load(mes: str | None = None) -> DashboardData:
             2,
         )
 
-        data.renda_mensal_total = income_sources_service.sum_active_monthly()
+        data.renda_mensal_total = income_sources_service.sum_for_month(mes)
         data.margem_apos_previsto = data.renda_mensal_total - data.previsto_mes
         data.margem_apos_gasto = data.renda_mensal_total - data.total_gasto_mes
 

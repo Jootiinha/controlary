@@ -2,12 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QHeaderView,
     QLabel,
-    QSizePolicy,
-    QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -25,6 +20,7 @@ from app.charts import (
 )
 from app.services import payments_service
 from app.ui.widgets.chart_canvas import ChartCanvas
+from app.ui.widgets.readonly_table import ReadOnlyTable
 from app.utils.formatting import format_currency, format_date_br
 
 
@@ -62,14 +58,10 @@ class HistoryView(QWidget):
         layout.addWidget(self.tabs)
 
     def _build_history_tab(self) -> QWidget:
-        self.tbl_history = QTableWidget(0, 6)
-        self.tbl_history.setHorizontalHeaderLabels(
-            ["Data", "Descrição", "Origem", "Categoria", "Forma", "Valor"]
+        self.tbl_history = ReadOnlyTable(
+            ["Data", "Descrição", "Origem", "Categoria", "Forma", "Valor"],
+            selectable=True,
         )
-        self.tbl_history.verticalHeader().setVisible(False)
-        self.tbl_history.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tbl_history.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.tbl_history.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
         wrapper = QWidget()
         lay = QVBoxLayout(wrapper)
@@ -88,17 +80,20 @@ class HistoryView(QWidget):
 
     def reload(self) -> None:
         payments = payments_service.list_all()
-        self.tbl_history.setRowCount(len(payments))
-        for i, p in enumerate(payments):
-            self.tbl_history.setItem(i, 0, QTableWidgetItem(format_date_br(p.data)))
-            self.tbl_history.setItem(i, 1, QTableWidgetItem(p.descricao))
+        rows = []
+        for p in payments:
             orig = p.conta_nome or p.cartao_nome or "—"
-            self.tbl_history.setItem(i, 2, QTableWidgetItem(orig))
-            self.tbl_history.setItem(
-                i, 3, QTableWidgetItem(p.categoria_nome or "—")
+            rows.append(
+                [
+                    format_date_br(p.data),
+                    p.descricao,
+                    orig,
+                    p.categoria_nome or "—",
+                    p.forma_pagamento,
+                    format_currency(p.valor),
+                ]
             )
-            self.tbl_history.setItem(i, 4, QTableWidgetItem(p.forma_pagamento))
-            self.tbl_history.setItem(i, 5, QTableWidgetItem(format_currency(p.valor)))
+        self.tbl_history.set_rows(rows)
 
         for i in range(1, self.tabs.count()):
             tab = self.tabs.widget(i)

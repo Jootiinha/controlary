@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from app.models.account import Account
 from app.models.card import Card
 from app.services import accounts_service, cards_service
+from app.ui.widgets.card import KpiCard
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
 from app.utils.formatting import format_currency
@@ -182,10 +183,40 @@ class _AccountsCrud(CrudPage):
         adj_lay.addStretch()
         self.layout().insertWidget(2, adj_row)
 
+        self.totals_wrap.setVisible(True)
+        self._kp_saldo = KpiCard(
+            "Saldo total",
+            "-",
+            "Soma dos saldos atuais",
+            compact=True,
+        )
+        self._kp_ncontas = KpiCard(
+            "Contas cadastradas",
+            "-",
+            "No cadastro",
+            compact=True,
+        )
+        self._kp_saldo_ini = KpiCard(
+            "Saldo inicial (soma)",
+            "-",
+            "Soma dos saldos iniciais",
+            compact=True,
+        )
+        self.totals_bar.addWidget(self._kp_saldo)
+        self.totals_bar.addWidget(self._kp_ncontas)
+        self.totals_bar.addWidget(self._kp_saldo_ini)
+
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
         self.btn_delete.clicked.connect(self._delete)
         self.btn_refresh.clicked.connect(self.reload)
+
+    def _refresh_kpi_cards(self) -> None:
+        contas = accounts_service.list_all()
+        total_ini = sum(float(a.saldo_inicial) for a in contas)
+        self._kp_saldo.set_value(format_currency(accounts_service.sum_balances()))
+        self._kp_ncontas.set_value(str(len(contas)))
+        self._kp_saldo_ini.set_value(format_currency(total_ini))
 
     def reload(self) -> None:
         rows = []
@@ -201,6 +232,7 @@ class _AccountsCrud(CrudPage):
                 ],
             ))
         self.model.set_rows(rows)
+        self._refresh_kpi_cards()
 
     def _adjust_balance(self) -> None:
         aid = self.selected_id()

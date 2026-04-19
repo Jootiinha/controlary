@@ -3,25 +3,22 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QFrame,
     QGridLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QScrollArea,
     QSizePolicy,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from app.charts import monthly_expenses, year_expense_evolution
+from app.charts import monthly_expenses, month_compare
 from app.services import calendar_service, dashboard_service, investments_service
 from app.services.calendar_service import CalendarEvent
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.chart_canvas import ChartCanvas
+from app.ui.widgets.readonly_table import ReadOnlyTable
 from app.utils.formatting import format_currency, format_date_br, format_month_br
 
 
@@ -133,7 +130,14 @@ class DashboardView(QWidget):
             f"Próximos vencimentos (próx. {calendar_service.UPCOMING_HORIZON_DAYS} dias)"
         )
         self.lbl_venc.setObjectName("PageSubtitle")
-        self.tbl_venc = self._make_table_venc(["Data", "Tipo", "Descrição", "Valor"])
+        self.tbl_venc = ReadOnlyTable(
+            ["Data", "Tipo", "Descrição", "Valor"],
+            fixed_height=160,
+            size_policy=(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            ),
+        )
 
         venc_wrap = QWidget()
         venc_wrap.setSizePolicy(
@@ -146,14 +150,14 @@ class DashboardView(QWidget):
         venc_lay.addWidget(self.lbl_venc)
         venc_lay.addWidget(self.tbl_venc)
 
-        self.chart_year = ChartCanvas(
-            year_expense_evolution.plot,
+        self.chart_month_compare = ChartCanvas(
+            month_compare.plot,
             width=8.0,
-            height=3.2,
+            height=2.6,
             dpi=100,
         )
-        self.chart_year.setMinimumHeight(280)
-        self.chart_year.setSizePolicy(
+        self.chart_month_compare.setMinimumHeight(220)
+        self.chart_month_compare.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
@@ -161,10 +165,10 @@ class DashboardView(QWidget):
         self.chart_cost_12m = ChartCanvas(
             monthly_expenses.plot,
             width=8.0,
-            height=3.2,
+            height=3.6,
             dpi=100,
         )
-        self.chart_cost_12m.setMinimumHeight(280)
+        self.chart_cost_12m.setMinimumHeight(320)
         self.chart_cost_12m.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -173,33 +177,51 @@ class DashboardView(QWidget):
         chart_box = QWidget()
         chart_lay = QVBoxLayout(chart_box)
         chart_lay.setContentsMargins(0, 0, 0, 0)
-        chart_lay.setSpacing(10)
-        chart_lay.addWidget(self.chart_year, 1)
+        chart_lay.setSpacing(12)
+        chart_lay.addWidget(self.chart_month_compare, 0)
         chart_lay.addWidget(self.chart_cost_12m, 1)
 
-        self.tbl_contas = self._make_table(["Conta", "Total do mês"])
-        self.tbl_formas = self._make_table(["Forma de pagamento", "Total do mês"])
+        self.tbl_contas = ReadOnlyTable(
+            ["Conta", "Total do mês"],
+            min_height=220,
+            size_policy=(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding,
+            ),
+        )
+        self.tbl_formas = ReadOnlyTable(
+            ["Forma de pagamento", "Total do mês"],
+            min_height=220,
+            size_policy=(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding,
+            ),
+        )
 
-        tables_box = QWidget()
-        tables_lay = QVBoxLayout(tables_box)
-        tables_lay.setContentsMargins(0, 0, 0, 0)
-        tables_lay.setSpacing(10)
-        tables_lay.addWidget(self._titled("Gastos por conta", self.tbl_contas), 1)
-        tables_lay.addWidget(
+        tables_row = QWidget()
+        tables_row.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        tables_row_lay = QHBoxLayout(tables_row)
+        tables_row_lay.setContentsMargins(0, 0, 0, 0)
+        tables_row_lay.setSpacing(14)
+        tables_row_lay.addWidget(self._titled("Gastos por conta", self.tbl_contas), 1)
+        tables_row_lay.addWidget(
             self._titled("Gastos por forma de pagamento", self.tbl_formas), 1
         )
 
-        bottom_row_wrap = QWidget()
-        bottom_row_wrap.setSizePolicy(
+        bottom_section = QWidget()
+        bottom_section.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
-        bottom_row_wrap.setMinimumHeight(600)
-        bottom_row = QHBoxLayout(bottom_row_wrap)
-        bottom_row.setContentsMargins(0, 0, 0, 0)
-        bottom_row.setSpacing(14)
-        bottom_row.addWidget(chart_box, 3)
-        bottom_row.addWidget(tables_box, 1)
+        bottom_section.setMinimumHeight(620)
+        bottom_col = QVBoxLayout(bottom_section)
+        bottom_col.setContentsMargins(0, 0, 0, 0)
+        bottom_col.setSpacing(14)
+        bottom_col.addWidget(chart_box, 1)
+        bottom_col.addWidget(tables_row, 0)
 
         content = QWidget()
         content.setObjectName("DashboardContent")
@@ -210,7 +232,7 @@ class DashboardView(QWidget):
         inner.addWidget(self.lbl_subtitle)
         inner.addWidget(kpi_wrap, 0)
         inner.addWidget(venc_wrap, 0)
-        inner.addWidget(bottom_row_wrap, 1)
+        inner.addWidget(bottom_section, 1)
 
         scroll = QScrollArea()
         scroll.setObjectName("DashboardScroll")
@@ -230,34 +252,6 @@ class DashboardView(QWidget):
         )
 
         self.reload()
-
-    def _make_table_venc(self, headers: list[str]) -> QTableWidget:
-        tbl = QTableWidget(0, len(headers))
-        tbl.setHorizontalHeaderLabels(headers)
-        tbl.verticalHeader().setVisible(False)
-        tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        tbl.setSelectionMode(QAbstractItemView.NoSelection)
-        tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        tbl.setFixedHeight(160)
-        tbl.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Fixed,
-        )
-        return tbl
-
-    def _make_table(self, headers: list[str]) -> QTableWidget:
-        tbl = QTableWidget(0, len(headers))
-        tbl.setHorizontalHeaderLabels(headers)
-        tbl.verticalHeader().setVisible(False)
-        tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        tbl.setSelectionMode(QAbstractItemView.NoSelection)
-        tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        tbl.setMinimumHeight(220)
-        tbl.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Expanding,
-        )
-        return tbl
 
     def _titled(self, title: str, widget: QWidget) -> QWidget:
         wrapper = QWidget()
@@ -316,23 +310,20 @@ class DashboardView(QWidget):
             self.card_proximo.set_value("—")
             self.card_proximo.set_subtitle("Nenhum")
 
-        self._fill_table(self.tbl_contas, data.gastos_por_conta)
-        self._fill_table(self.tbl_formas, data.gastos_por_forma)
+        self._fill_table(data.gastos_por_conta, self.tbl_contas)
+        self._fill_table(data.gastos_por_forma, self.tbl_formas)
         self._fill_vencimentos(data.proximos_vencimentos)
 
-        self.chart_year.refresh()
+        self.chart_month_compare.refresh()
         self.chart_cost_12m.refresh()
 
-    def _fill_table(self, tbl: QTableWidget, rows: list[tuple[str, float]]) -> None:
+    def _fill_table(
+        self, rows: list[tuple[str, float]], tbl: ReadOnlyTable
+    ) -> None:
         if not rows:
-            tbl.setRowCount(1)
-            tbl.setItem(0, 0, QTableWidgetItem("Sem lançamentos no mês"))
-            tbl.setItem(0, 1, QTableWidgetItem("—"))
+            tbl.set_rows([], empty_message="Sem lançamentos no mês")
             return
-        tbl.setRowCount(len(rows))
-        for i, (label, value) in enumerate(rows):
-            tbl.setItem(i, 0, QTableWidgetItem(label))
-            tbl.setItem(i, 1, QTableWidgetItem(format_currency(value)))
+        tbl.set_rows([[label, format_currency(value)] for label, value in rows])
 
     _VENC_TIPO = {
         "assinatura": "Assinatura",
@@ -344,16 +335,19 @@ class DashboardView(QWidget):
     def _fill_vencimentos(self, rows: list[CalendarEvent]) -> None:
         tbl = self.tbl_venc
         if not rows:
-            tbl.setRowCount(1)
-            tbl.setItem(0, 0, QTableWidgetItem("—"))
-            tbl.setItem(0, 1, QTableWidgetItem("—"))
-            tbl.setItem(0, 2, QTableWidgetItem("Nada a vencer neste período"))
-            tbl.setItem(0, 3, QTableWidgetItem("—"))
+            tbl.set_rows(
+                [],
+                empty_row=["—", "—", "Nada a vencer neste período", "—"],
+            )
             return
-        tbl.setRowCount(len(rows))
-        for i, ev in enumerate(rows):
-            tipo = self._VENC_TIPO.get(ev.tipo, ev.tipo)
-            tbl.setItem(i, 0, QTableWidgetItem(format_date_br(ev.data)))
-            tbl.setItem(i, 1, QTableWidgetItem(tipo))
-            tbl.setItem(i, 2, QTableWidgetItem(ev.titulo))
-            tbl.setItem(i, 3, QTableWidgetItem(format_currency(ev.valor)))
+        tbl.set_rows(
+            [
+                [
+                    format_date_br(ev.data),
+                    self._VENC_TIPO.get(ev.tipo, ev.tipo),
+                    ev.titulo,
+                    format_currency(ev.valor),
+                ]
+                for ev in rows
+            ]
+        )

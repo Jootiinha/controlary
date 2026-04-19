@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from datetime import date
 
+from matplotlib.ticker import FuncFormatter
+
 from app.charts.plot_labels import annotate_line_points
 from app.database.connection import transaction
 from app.services import installments_service, subscriptions_service
+from app.utils.formatting import format_currency_short
 
 
 def _parse_ym(ym: str) -> tuple[int, int]:
@@ -163,7 +166,9 @@ def plot(ax) -> None:
         leg.get_frame().set_linewidth(0.8)
 
     ax.set_title("Evolução da fatura por mês de referência")
-    ax.set_ylabel("R$")
+    ax.yaxis.set_major_formatter(
+        FuncFormatter(lambda v, _: format_currency_short(v))
+    )
     ax.tick_params(axis="x", rotation=45)
     for label in ax.get_xticklabels():
         label.set_ha("right")

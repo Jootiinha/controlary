@@ -381,6 +381,24 @@ def _migrate_income_sources_account_id(conn) -> None:
         )
 
 
+def _migrate_income_sources_avulsas_parceladas(conn) -> None:
+    cols = _table_columns(conn, "income_sources")
+    if "tipo" not in cols:
+        conn.execute(
+            "ALTER TABLE income_sources ADD COLUMN tipo TEXT NOT NULL DEFAULT 'recorrente'"
+        )
+    if "mes_referencia" not in cols:
+        conn.execute("ALTER TABLE income_sources ADD COLUMN mes_referencia TEXT")
+    if "total_parcelas" not in cols:
+        conn.execute("ALTER TABLE income_sources ADD COLUMN total_parcelas INTEGER")
+    if "parcelas_recebidas" not in cols:
+        conn.execute(
+            "ALTER TABLE income_sources ADD COLUMN parcelas_recebidas INTEGER NOT NULL DEFAULT 0"
+        )
+    if "forma_recebimento" not in cols:
+        conn.execute("ALTER TABLE income_sources ADD COLUMN forma_recebimento TEXT")
+
+
 def _migrate_installments_account_id(conn) -> None:
     cols = _table_columns(conn, "installments")
     if "account_id" not in cols:
@@ -497,6 +515,7 @@ def run_migrations() -> None:
         _migrate_investments_tables(conn)
         _migrate_accounts_saldo_e_transacoes(conn)
         _migrate_income_sources_account_id(conn)
+        _migrate_income_sources_avulsas_parceladas(conn)
         _migrate_installments_account_id(conn)
         _migrate_month_tracking_tables(conn)
         _ensure_indexes_on_fk_columns(conn)

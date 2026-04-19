@@ -12,6 +12,26 @@ def format_currency(value: float | int | None) -> str:
     return f"R$ {formatted}"
 
 
+def format_currency_short(value: float | int | None) -> str:
+    """Rótulos compactos para gráficos (ex.: R$ 1,2k, R$ 12k, R$ 1,2M)."""
+    if value is None:
+        return "R$ 0"
+    x = abs(float(value))
+    sign = "-" if float(value) < 0 else ""
+    if x >= 1_000_000:
+        s = f"{x / 1_000_000:.1f}".replace(".", ",").rstrip("0").rstrip(",")
+        if s == "":
+            s = "0"
+        return f"{sign}R$ {s}M"
+    if x >= 1000:
+        s = f"{x / 1000:.1f}".replace(".", ",").rstrip("0").rstrip(",")
+        if s == "":
+            s = "0"
+        return f"{sign}R$ {s}k"
+    n = int(round(x))
+    return f"{sign}R$ {n:,}".replace(",", ".")
+
+
 def parse_date(value: str) -> date:
     return datetime.strptime(value, "%Y-%m-%d").date()
 

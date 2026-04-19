@@ -113,9 +113,9 @@ def events_for_month(ano: int, mes: int) -> list[CalendarEvent]:
         )
 
     for src in income_sources_service.list_all():
-        if not src.ativo:
-            continue
         if src.id is None:
+            continue
+        if not income_sources_service.applies_to_month(src, ano_mes):
             continue
         d = _data_com_dia(ano, mes, src.dia_recebimento)
         out.append(

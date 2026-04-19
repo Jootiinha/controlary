@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QTabWidget,
-    QTableWidget,
     QTableWidgetItem,
     QSizePolicy,
     QVBoxLayout,
@@ -33,6 +32,7 @@ from app.ui.categories_view import CategoryDialog
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.category_picker import CategoryPicker
 from app.ui.widgets.crud_page import CrudPage
+from app.ui.widgets.readonly_table import ReadOnlyTable
 from app.ui.widgets.form_dialog import FormDialog
 from app.ui.widgets.payment_confirmation_dialog import FixedExpensePaidDialog
 from app.utils.formatting import format_currency, format_month_br
@@ -283,47 +283,40 @@ class _MonthlyControl(QWidget):
         self._monthly_search.textChanged.connect(self._apply_monthly_search)
         search_row.addWidget(self._monthly_search, 1)
 
-        self.tbl = QTableWidget(0, 5)
-        self.tbl.setHorizontalHeaderLabels(
-            ["Nome", "Valor", "Dia", "Status", "Observação"]
+        self.tbl = ReadOnlyTable(
+            ["Nome", "Valor", "Dia", "Status", "Observação"],
+            selectable=True,
+            selection_behavior=QAbstractItemView.SelectionBehavior.SelectRows,
+            alternating_row_colors=True,
+            show_grid=True,
+            word_wrap=False,
+            vertical_header_default_section_size=44,
+            section_resize_modes=[
+                QHeaderView.ResizeMode.Stretch,
+                QHeaderView.ResizeMode.Fixed,
+                QHeaderView.ResizeMode.Fixed,
+                QHeaderView.ResizeMode.Fixed,
+                QHeaderView.ResizeMode.Stretch,
+            ],
+            column_widths={1: 112, 2: 44, 3: 178},
+            header_default_alignment=(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            ),
+            stretch_last_section=False,
         )
-        self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tbl.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tbl.setAlternatingRowColors(True)
-        self.tbl.setShowGrid(True)
-        self.tbl.verticalHeader().setVisible(False)
-        self.tbl.verticalHeader().setDefaultSectionSize(44)
-        self.tbl.setWordWrap(False)
-
-        th = self.tbl.horizontalHeader()
-        th.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        th.setStretchLastSection(False)
-        th.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        th.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        th.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        th.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        th.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        self.tbl.setColumnWidth(1, 112)
-        self.tbl.setColumnWidth(2, 44)
-        self.tbl.setColumnWidth(3, 178)
 
         self.tbl.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
         proj_title = QLabel("Projeção — meses restantes do ano (só pendentes)")
         proj_title.setObjectName("PageSubtitle")
-        self.tbl_proj = QTableWidget(0, 2)
-        self.tbl_proj.setHorizontalHeaderLabels(["Mês", "Total pendente (fixos)"])
-        self.tbl_proj.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tbl_proj.setSelectionMode(QAbstractItemView.NoSelection)
-        self.tbl_proj.verticalHeader().setVisible(False)
-        self.tbl_proj.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
+        self.tbl_proj = ReadOnlyTable(
+            ["Mês", "Total pendente (fixos)"],
+            section_resize_modes=[
+                QHeaderView.ResizeMode.Stretch,
+                QHeaderView.ResizeMode.ResizeToContents,
+            ],
+            min_height=100,
         )
-        self.tbl_proj.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.tbl_proj.setMinimumHeight(100)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -402,27 +395,24 @@ class _MonthlyControl(QWidget):
         ym = self.ano_mes()
         items = fixed_expenses_service.list_active()
         self.tbl.setRowCount(len(items))
-        align_left = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
-        align_val = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
-        align_center = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter
         for i, fe in enumerate(items):
             if fe.id is None:
                 continue
 
             it_nome = QTableWidgetItem(fe.nome)
-            it_nome.setTextAlignment(align_left)
+            it_nome.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
             self.tbl.setItem(i, 0, it_nome)
 
             it_val = QTableWidgetItem(format_currency(fe.valor_mensal))
-            it_val.setTextAlignment(align_val)
+            it_val.setTextAlignment(ReadOnlyTable.ALIGN_RIGHT)
             self.tbl.setItem(i, 1, it_val)
 
             it_dia = QTableWidgetItem(str(fe.dia_referencia))
-            it_dia.setTextAlignment(align_center)
+            it_dia.setTextAlignment(ReadOnlyTable.ALIGN_CENTER)
             self.tbl.setItem(i, 2, it_dia)
 
             it_obs = QTableWidgetItem(fe.observacao or "")
-            it_obs.setTextAlignment(align_left)
+            it_obs.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
             self.tbl.setItem(i, 4, it_obs)
 
             cb = QComboBox()
@@ -492,10 +482,9 @@ class _MonthlyControl(QWidget):
 
     def _reload_projection(self) -> None:
         data = fixed_expenses_service.projection_by_month_rest_of_year()
-        self.tbl_proj.setRowCount(len(data))
-        for i, (ym, total) in enumerate(data):
-            self.tbl_proj.setItem(i, 0, QTableWidgetItem(format_month_br(ym)))
-            self.tbl_proj.setItem(i, 1, QTableWidgetItem(format_currency(total)))
+        self.tbl_proj.set_rows(
+            [[format_month_br(ym), format_currency(total)] for ym, total in data]
+        )
 
     def reload_all(self) -> None:
         self._reload_table()

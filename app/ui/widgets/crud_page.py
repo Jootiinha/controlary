@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.ui.widgets.wrapping_header import WrappingHeaderView
+
 
 class SimpleTableModel(QAbstractTableModel):
     """Modelo de tabela simples baseado em listas de strings."""
@@ -130,6 +132,7 @@ class CrudPage(QWidget):
         self._proxy.setSourceModel(self.model)
 
         self.table = QTableView()
+        self.table.setHorizontalHeader(WrappingHeaderView(self.table))
         self.table.setModel(self._proxy)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)

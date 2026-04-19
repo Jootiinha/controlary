@@ -146,15 +146,26 @@ CREATE TABLE IF NOT EXISTS fixed_expense_months (
 CREATE INDEX IF NOT EXISTS idx_fixed_expense_months_mes ON fixed_expense_months(ano_mes);
 
 CREATE TABLE IF NOT EXISTS income_sources (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome            TEXT    NOT NULL COLLATE NOCASE UNIQUE,
-    valor_mensal    REAL    NOT NULL,
-    ativo           INTEGER NOT NULL DEFAULT 1,
-    dia_recebimento INTEGER NOT NULL DEFAULT 5,
-    account_id      INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
-    observacao      TEXT,
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome                TEXT    NOT NULL COLLATE NOCASE UNIQUE,
+    valor_mensal        REAL    NOT NULL,
+    ativo               INTEGER NOT NULL DEFAULT 1,
+    dia_recebimento     INTEGER NOT NULL DEFAULT 5,
+    account_id          INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+    observacao          TEXT,
+    tipo                TEXT    NOT NULL DEFAULT 'recorrente'
+                        CHECK (tipo IN ('recorrente', 'avulsa', 'parcelada')),
+    mes_referencia      TEXT,
+    total_parcelas      INTEGER,
+    parcelas_recebidas  INTEGER NOT NULL DEFAULT 0,
+    forma_recebimento   TEXT,
     CHECK (valor_mensal >= 0),
-    CHECK (dia_recebimento BETWEEN 1 AND 31)
+    CHECK (dia_recebimento BETWEEN 1 AND 31),
+    CHECK (tipo = 'recorrente' OR mes_referencia IS NOT NULL),
+    CHECK (tipo <> 'parcelada' OR (
+        total_parcelas IS NOT NULL AND total_parcelas >= 1
+        AND parcelas_recebidas >= 0 AND parcelas_recebidas <= total_parcelas
+    ))
 );
 
 CREATE INDEX IF NOT EXISTS idx_income_sources_ativo ON income_sources(ativo);
