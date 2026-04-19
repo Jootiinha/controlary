@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QDateEdit,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFormLayout,
     QLabel,
     QVBoxLayout,
@@ -70,13 +71,20 @@ class FixedExpensePaidDialog(QDialog):
                 if self.cmb_conta.itemData(i) == fe.conta_id:
                     self.cmb_conta.setCurrentIndex(i)
                     break
+        self.sp_valor = QDoubleSpinBox()
+        self.sp_valor.setRange(0.0, 500_000.0)
+        self.sp_valor.setDecimals(2)
+        self.sp_valor.setPrefix("R$ ")
+        self.sp_valor.setSingleStep(50.0)
+        self.sp_valor.setValue(float(fe.valor_mensal))
         form = QFormLayout()
         form.addRow("", self.chk_mirror)
+        form.addRow("Valor real pago *", self.sp_valor)
         form.addRow("Data do pagamento", self.dt)
         form.addRow("Conta do lançamento espelho", self.cmb_conta)
         txt = QLabel(
-            f"Confirma pagamento de {fe.nome} ({format_currency(fe.valor_mensal)}) "
-            f"na competência {ano_mes}?"
+            f"Confirma pagamento de {fe.nome} (estimativa cadastrada: "
+            f"{format_currency(fe.valor_mensal)}) na competência {ano_mes}?"
         )
         txt.setWordWrap(True)
         btns = QDialogButtonBox(
@@ -89,6 +97,9 @@ class FixedExpensePaidDialog(QDialog):
         lay.addLayout(form)
         lay.addWidget(btns)
 
+    def valor_efetivo(self) -> float:
+        return float(self.sp_valor.value())
+
     def mirror_payment(self) -> Optional[Payment]:
         if not self.chk_mirror.isChecked():
             return None
@@ -97,7 +108,7 @@ class FixedExpensePaidDialog(QDialog):
             return None
         return Payment(
             id=None,
-            valor=float(self._fe.valor_mensal),
+            valor=self.valor_efetivo(),
             descricao=f"Fixo: {self._fe.nome} ({self._ano_mes})",
             data=self.dt.date().toString("yyyy-MM-dd"),
             conta_id=int(cid),

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
+    QSplitter,
     QTabWidget,
     QTableWidgetItem,
     QSizePolicy,
@@ -239,15 +240,23 @@ class _MonthlyControl(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         self._rows: list[tuple[int, QComboBox]] = []
         self._monthly_hints: list[str] = []
 
         hint = QLabel(
-            "Escolha a competência (mês/ano). Cada item ativo aparece como Pendente até você marcar Pago. "
-            "O previsto do mês e o total do restante do ano usam só o que ainda está pendente."
+            "Marque cada gasto fixo ativo como Pago na competência escolhida. "
+            "Totais e projeção consideram apenas o que ainda está pendente."
         )
         hint.setWordWrap(True)
         hint.setObjectName("PageSubtitle")
+        hint.setToolTip(
+            "Escolha o mês/ano (competência). Cada item ativo começa como Pendente até você marcar Pago. "
+            "O previsto do mês e o total do restante do ano usam só valores ainda pendentes."
+        )
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Competência:"))
@@ -256,13 +265,18 @@ class _MonthlyControl(QWidget):
         self.dt.setCalendarPopup(True)
         self.dt.setDate(QDate.currentDate())
         self.dt.dateChanged.connect(self._reload_table)
+        self.dt.setToolTip("Competência (mês/ano) para marcar pagamentos e ver totais.")
         row.addWidget(self.dt)
-        row.addStretch()
+        self._monthly_search = QLineEdit()
+        self._monthly_search.setPlaceholderText("Buscar…")
+        self._monthly_search.setClearButtonEnabled(True)
+        self._monthly_search.textChanged.connect(self._apply_monthly_search)
+        row.addWidget(self._monthly_search, 1)
         self.btn_edit = QPushButton("Editar despesa…")
         self.btn_edit.setObjectName("PrimaryButton")
         self.btn_edit.setToolTip(
             "Abre o cadastro do gasto fixo selecionado. "
-            "Também é possível dar duplo clique em Nome, Valor, Dia ou Observação."
+            "Também é possível dar duplo clique em Nome, Valor ou Dia."
         )
         self.btn_edit.clicked.connect(self._edit_selected)
         row.addWidget(self.btn_edit)
@@ -275,16 +289,8 @@ class _MonthlyControl(QWidget):
         kpi_row.addWidget(self._kp_pend)
         kpi_row.addWidget(self._kp_mes)
 
-        search_row = QHBoxLayout()
-        search_row.addWidget(QLabel("Buscar:"))
-        self._monthly_search = QLineEdit()
-        self._monthly_search.setPlaceholderText("Buscar…")
-        self._monthly_search.setClearButtonEnabled(True)
-        self._monthly_search.textChanged.connect(self._apply_monthly_search)
-        search_row.addWidget(self._monthly_search, 1)
-
         self.tbl = ReadOnlyTable(
-            ["Nome", "Valor", "Dia", "Status", "Observação"],
+            ["Nome", "Valor", "Dia", "Status"],
             selectable=True,
             selection_behavior=QAbstractItemView.SelectionBehavior.SelectRows,
             alternating_row_colors=True,
@@ -296,7 +302,6 @@ class _MonthlyControl(QWidget):
                 QHeaderView.ResizeMode.Fixed,
                 QHeaderView.ResizeMode.Fixed,
                 QHeaderView.ResizeMode.Fixed,
-                QHeaderView.ResizeMode.Stretch,
             ],
             column_widths={1: 112, 2: 44, 3: 178},
             header_default_alignment=(
@@ -318,15 +323,34 @@ class _MonthlyControl(QWidget):
             min_height=100,
         )
 
+        month_panel = QWidget()
+        month_lay = QVBoxLayout(month_panel)
+        month_lay.setContentsMargins(0, 0, 0, 0)
+        month_lay.setSpacing(12)
+        month_lay.addWidget(hint)
+        month_lay.addLayout(row)
+        month_lay.addLayout(kpi_row)
+        month_lay.addWidget(self.tbl, 1)
+
+        proj_panel = QWidget()
+        proj_lay = QVBoxLayout(proj_panel)
+        proj_lay.setContentsMargins(0, 0, 0, 0)
+        proj_lay.setSpacing(8)
+        proj_lay.addWidget(proj_title)
+        proj_lay.addWidget(self.tbl_proj, 1)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(month_panel)
+        splitter.addWidget(proj_panel)
+        splitter.setStretchFactor(0, 7)
+        splitter.setStretchFactor(1, 3)
+        splitter.setSizes([720, 300])
+
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.addWidget(hint)
-        layout.addLayout(row)
-        layout.addLayout(kpi_row)
-        layout.addLayout(search_row)
-        layout.addWidget(self.tbl, 1)
-        layout.addWidget(proj_title)
-        layout.addWidget(self.tbl_proj, 1)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(splitter, 1)
         self._reload_table()
         self._reload_projection()
 
@@ -350,16 +374,8 @@ class _MonthlyControl(QWidget):
 
     def _refresh_monthly_kpis(self) -> None:
         ym = self.ano_mes()
-        pago = 0.0
-        pend = 0.0
-        for fe in fixed_expenses_service.list_active():
-            if fe.id is None:
-                continue
-            v = float(fe.valor_mensal)
-            if fixed_expenses_service.is_paid(fe.id, ym):
-                pago += v
-            else:
-                pend += v
+        pago = fixed_expenses_service.sum_paid_for_month(ym)
+        pend = fixed_expenses_service.sum_unpaid_for_month(ym)
         total = pago + pend
         self._kp_pago.set_value(format_currency(pago))
         self._kp_pend.set_value(format_currency(pend))
@@ -403,7 +419,18 @@ class _MonthlyControl(QWidget):
             it_nome.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
             self.tbl.setItem(i, 0, it_nome)
 
-            it_val = QTableWidgetItem(format_currency(fe.valor_mensal))
+            pago_row = fixed_expenses_service.is_paid(fe.id, ym)
+            ve = (
+                fixed_expenses_service.get_valor_efetivo(fe.id, ym)
+                if pago_row
+                else None
+            )
+            v_show = (
+                float(ve)
+                if ve is not None
+                else float(fe.valor_mensal)
+            )
+            it_val = QTableWidgetItem(format_currency(v_show))
             it_val.setTextAlignment(ReadOnlyTable.ALIGN_RIGHT)
             self.tbl.setItem(i, 1, it_val)
 
@@ -411,17 +438,12 @@ class _MonthlyControl(QWidget):
             it_dia.setTextAlignment(ReadOnlyTable.ALIGN_CENTER)
             self.tbl.setItem(i, 2, it_dia)
 
-            it_obs = QTableWidgetItem(fe.observacao or "")
-            it_obs.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
-            self.tbl.setItem(i, 4, it_obs)
-
             cb = QComboBox()
             cb.addItems(["Pendente", "Pago"])
             cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             cb.setMinimumWidth(138)
-            pago = fixed_expenses_service.is_paid(fe.id, ym)
             cb.blockSignals(True)
-            cb.setCurrentIndex(1 if pago else 0)
+            cb.setCurrentIndex(1 if pago_row else 0)
             cb.blockSignals(False)
             fid = fe.id
 
@@ -429,11 +451,13 @@ class _MonthlyControl(QWidget):
                 def on_change(_idx: int) -> None:
                     want_pago = combo.currentIndex() == 1
                     was_pago = fixed_expenses_service.is_paid(f_id, competencia)
+                    if want_pago == was_pago:
+                        return
                     if want_pago and not was_pago:
-                        fe = fixed_expenses_service.get(f_id)
-                        if fe is None:
+                        fe_local = fixed_expenses_service.get(f_id)
+                        if fe_local is None:
                             return
-                        dlg = FixedExpensePaidDialog(self, fe, competencia)
+                        dlg = FixedExpensePaidDialog(self, fe_local, competencia)
                         if dlg.exec() != QDialog.Accepted:
                             combo.blockSignals(True)
                             combo.setCurrentIndex(0)
@@ -443,7 +467,10 @@ class _MonthlyControl(QWidget):
                         if mp is not None:
                             payments_service.create(mp, record_ledger=False)
                         fixed_expenses_service.set_month_status(
-                            f_id, competencia, pago=True
+                            f_id,
+                            competencia,
+                            pago=True,
+                            valor_efetivo=dlg.valor_efetivo(),
                         )
                     else:
                         fixed_expenses_service.set_month_status(
@@ -465,11 +492,11 @@ class _MonthlyControl(QWidget):
             self.tbl.setCellWidget(i, 3, status_cell)
             self._rows.append((fid, cb))
 
-            st_txt = "pago" if pago else "pendente"
+            st_txt = "pago" if pago_row else "pendente"
             hint = " ".join(
                 [
                     fe.nome.lower(),
-                    format_currency(fe.valor_mensal).lower(),
+                    format_currency(v_show).lower(),
                     str(fe.dia_referencia),
                     st_txt,
                     (fe.observacao or "").lower(),

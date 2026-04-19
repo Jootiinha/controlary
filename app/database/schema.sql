@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS fixed_expense_months (
     fixed_expense_id INTEGER NOT NULL REFERENCES fixed_expenses(id) ON DELETE CASCADE,
     ano_mes          TEXT    NOT NULL,
     status           TEXT    NOT NULL DEFAULT 'pendente',
+    valor_efetivo    REAL,
     PRIMARY KEY (fixed_expense_id, ano_mes),
     CHECK (status IN ('pendente', 'pago'))
 );

@@ -29,10 +29,25 @@ def is_paid(fe_id: int, ano_mes: str) -> bool:
     return st == "pago"
 
 
+def get_valor_efetivo(fe_id: int, ano_mes: str) -> Optional[float]:
+    with transaction() as conn:
+        row = conn.execute(
+            """
+            SELECT valor_efetivo FROM fixed_expense_months
+             WHERE fixed_expense_id = ? AND ano_mes = ?
+            """,
+            (fe_id, ano_mes),
+        ).fetchone()
+    if not row or row["valor_efetivo"] is None:
+        return None
+    return float(row["valor_efetivo"])
+
+
 def set_month_status(
     fe_id: int,
     ano_mes: str,
     pago: bool,
+    valor_efetivo: Optional[float] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> None:
     status = "pago" if pago else "pendente"
@@ -47,6 +62,12 @@ def set_month_status(
             (fe_id,),
         ).fetchone()
         key = accounts_service.transaction_key_fixed(fe_id, ano_mes)
+        valor_debito = (
+            float(valor_efetivo)
+            if valor_efetivo is not None
+            else (float(fe["valor_mensal"]) if fe else 0.0)
+        )
+        valor_gravado: Optional[float] = valor_efetivo if pago else None
         if not pago:
             accounts_service.remove_transaction_key(key, conn=c)
         elif fe and fe["conta_id"]:
@@ -55,7 +76,7 @@ def set_month_status(
             data = f"{y:04d}-{m:02d}-{dia:02d}"
             accounts_service.upsert_transaction(
                 int(fe["conta_id"]),
-                -float(fe["valor_mensal"]),
+                -valor_debito,
                 data,
                 "fixo",
                 key,
@@ -72,18 +93,18 @@ def set_month_status(
         if row:
             c.execute(
                 """
-                UPDATE fixed_expense_months SET status = ?
+                UPDATE fixed_expense_months SET status = ?, valor_efetivo = ?
                  WHERE fixed_expense_id = ? AND ano_mes = ?
                 """,
-                (status, fe_id, ano_mes),
+                (status, valor_gravado, fe_id, ano_mes),
             )
         else:
             c.execute(
                 """
-                INSERT INTO fixed_expense_months (fixed_expense_id, ano_mes, status)
-                VALUES (?, ?, ?)
+                INSERT INTO fixed_expense_months (fixed_expense_id, ano_mes, status, valor_efetivo)
+                VALUES (?, ?, ?, ?)
                 """,
-                (fe_id, ano_mes, status),
+                (fe_id, ano_mes, status, valor_gravado),
             )
 
     if conn is not None:
@@ -211,6 +232,22 @@ def sum_unpaid_for_month(ano_mes: str) -> float:
         if r["status"] != "pago":
             total += float(r["valor_mensal"] or 0)
     return round(total, 2)
+
+
+def sum_paid_for_month(ano_mes: str) -> float:
+    """Soma valores pagos no mês (valor_efetivo quando informado, senão valor_mensal)."""
+    with transaction() as conn:
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(COALESCE(m.valor_efetivo, f.valor_mensal)), 0) AS t
+              FROM fixed_expenses f
+              JOIN fixed_expense_months m
+                ON m.fixed_expense_id = f.id AND m.ano_mes = ?
+             WHERE f.ativo = 1 AND m.status = 'pago'
+            """,
+            (ano_mes,),
+        ).fetchone()
+    return round(float(row["t"] or 0), 2)
 
 
 def sum_unpaid_rest_of_calendar_year() -> float:

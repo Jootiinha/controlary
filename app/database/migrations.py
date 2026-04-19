@@ -518,6 +518,15 @@ def _migrate_month_tracking_tables(conn) -> None:
     )
 
 
+def _migrate_fixed_expense_months_valor_efetivo(conn) -> None:
+    cols = _table_columns(conn, "fixed_expense_months")
+    if "valor_efetivo" in cols:
+        return
+    conn.execute(
+        "ALTER TABLE fixed_expense_months ADD COLUMN valor_efetivo REAL"
+    )
+
+
 def _migrate_investments_tables(conn) -> None:
     conn.execute(
         """
@@ -582,4 +591,5 @@ def run_migrations() -> None:
         _migrate_income_sources_relax_nome_unique(conn)
         _migrate_installments_account_id(conn)
         _migrate_month_tracking_tables(conn)
+        _migrate_fixed_expense_months_valor_efetivo(conn)
         _ensure_indexes_on_fk_columns(conn)
