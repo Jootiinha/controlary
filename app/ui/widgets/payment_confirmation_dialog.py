@@ -62,15 +62,20 @@ class FixedExpensePaidDialog(QDialog):
         self.dt.setDisplayFormat("dd/MM/yyyy")
         self.dt.setCalendarPopup(True)
         self.dt.setDate(QDate.currentDate())
-        self.cmb_conta = QComboBox()
-        self.cmb_conta.addItem("(Nenhuma)", None)
-        for a in accounts_service.list_all():
-            self.cmb_conta.addItem(a.nome, a.id)
+
+        self.cmb_mirror = QComboBox()
+        self.cmb_pagamento = QComboBox()
+        for combo in (self.cmb_mirror, self.cmb_pagamento):
+            combo.addItem("(Nenhuma)", None)
+            for a in accounts_service.list_all():
+                combo.addItem(a.nome, a.id)
+
         if fe.conta_id is not None:
-            for i in range(self.cmb_conta.count()):
-                if self.cmb_conta.itemData(i) == fe.conta_id:
-                    self.cmb_conta.setCurrentIndex(i)
+            for i in range(self.cmb_mirror.count()):
+                if self.cmb_mirror.itemData(i) == fe.conta_id:
+                    self.cmb_mirror.setCurrentIndex(i)
                     break
+
         self.sp_valor = QDoubleSpinBox()
         self.sp_valor.setRange(0.0, 500_000.0)
         self.sp_valor.setDecimals(2)
@@ -81,7 +86,10 @@ class FixedExpensePaidDialog(QDialog):
         form.addRow("", self.chk_mirror)
         form.addRow("Valor real pago *", self.sp_valor)
         form.addRow("Data do pagamento", self.dt)
-        form.addRow("Conta do lançamento espelho", self.cmb_conta)
+        if fe.conta_id is not None:
+            form.addRow("Conta do lançamento espelho", self.cmb_mirror)
+        else:
+            form.addRow("Conta utilizada no pagamento", self.cmb_pagamento)
         txt = QLabel(
             f"Confirma pagamento de {fe.nome} (estimativa cadastrada: "
             f"{format_currency(fe.valor_mensal)}) na competência {ano_mes}?"
@@ -100,10 +108,20 @@ class FixedExpensePaidDialog(QDialog):
     def valor_efetivo(self) -> float:
         return float(self.sp_valor.value())
 
+    def conta_debito_para_livro(self) -> Optional[int]:
+        """Conta para débito no livro-caixa quando o cadastro não tem conta; senão None."""
+        if self._fe.conta_id is not None:
+            return None
+        cid = self.cmb_pagamento.currentData()
+        return int(cid) if cid is not None else None
+
     def mirror_payment(self) -> Optional[Payment]:
         if not self.chk_mirror.isChecked():
             return None
-        cid = self.cmb_conta.currentData()
+        if self._fe.conta_id is not None:
+            cid = self.cmb_mirror.currentData()
+        else:
+            cid = self.cmb_pagamento.currentData()
         if cid is None:
             return None
         return Payment(

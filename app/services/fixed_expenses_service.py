@@ -48,6 +48,7 @@ def set_month_status(
     ano_mes: str,
     pago: bool,
     valor_efetivo: Optional[float] = None,
+    conta_debito_id: Optional[int] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> None:
     status = "pago" if pago else "pendente"
@@ -68,14 +69,20 @@ def set_month_status(
             else (float(fe["valor_mensal"]) if fe else 0.0)
         )
         valor_gravado: Optional[float] = valor_efetivo if pago else None
+        effective_conta: Optional[int] = None
+        if fe:
+            if fe["conta_id"]:
+                effective_conta = int(fe["conta_id"])
+            elif conta_debito_id is not None:
+                effective_conta = int(conta_debito_id)
         if not pago:
             accounts_service.remove_transaction_key(key, conn=c)
-        elif fe and fe["conta_id"]:
+        elif effective_conta is not None:
             y, m = map(int, ano_mes.split("-"))
             dia = min(int(fe["dia_referencia"] or 5), monthrange(y, m)[1])
             data = f"{y:04d}-{m:02d}-{dia:02d}"
             accounts_service.upsert_transaction(
-                int(fe["conta_id"]),
+                effective_conta,
                 -valor_debito,
                 data,
                 "fixo",

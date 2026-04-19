@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QDate, Qt, Signal
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -42,6 +43,35 @@ from app.utils.formatting import format_currency, format_month_br
 FORMAS = [
     "Pix", "Débito", "Crédito", "Dinheiro", "Boleto", "Transferência", "Débito Automático",
 ]
+
+
+def _fixed_due_date_for_month(ym: str, dia_referencia: int) -> QDate:
+    y, m = map(int, ym.split("-"))
+    first = QDate(y, m, 1)
+    day = min(int(dia_referencia), first.daysInMonth())
+    return QDate(y, m, day)
+
+
+def _apply_fixed_monthly_status_icon(
+    item: QTableWidgetItem,
+    paid: bool,
+    ym: str,
+    dia_referencia: int,
+) -> None:
+    item.setTextAlignment(ReadOnlyTable.ALIGN_CENTER)
+    due = _fixed_due_date_for_month(ym, dia_referencia)
+    today = QDate.currentDate()
+    if paid:
+        item.setText("➤")
+        item.setForeground(QBrush(QColor(34, 139, 34)))
+        item.setToolTip("Pago")
+        return
+    if due < today:
+        item.setText("🔴")
+        item.setToolTip(f"Atrasado — vencimento {due.toString('dd/MM/yyyy')}")
+    else:
+        item.setText("⚠️")
+        item.setToolTip(f"Pendente — vence em {due.toString('dd/MM/yyyy')}")
 
 
 class FixedExpenseDialog(FormDialog):
@@ -290,7 +320,7 @@ class _MonthlyControl(QWidget):
         kpi_row.addWidget(self._kp_mes)
 
         self.tbl = ReadOnlyTable(
-            ["Nome", "Valor", "Dia", "Status"],
+            ["", "Nome", "Valor", "Dia", "Status"],
             selectable=True,
             selection_behavior=QAbstractItemView.SelectionBehavior.SelectRows,
             alternating_row_colors=True,
@@ -298,12 +328,13 @@ class _MonthlyControl(QWidget):
             word_wrap=False,
             vertical_header_default_section_size=44,
             section_resize_modes=[
+                QHeaderView.ResizeMode.Fixed,
                 QHeaderView.ResizeMode.Stretch,
                 QHeaderView.ResizeMode.Fixed,
                 QHeaderView.ResizeMode.Fixed,
                 QHeaderView.ResizeMode.Fixed,
             ],
-            column_widths={1: 112, 2: 44, 3: 178},
+            column_widths={0: 48, 2: 112, 3: 44, 4: 178},
             header_default_alignment=(
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             ),
@@ -359,7 +390,7 @@ class _MonthlyControl(QWidget):
         return f"{d.year():04d}-{d.month():02d}"
 
     def _on_cell_double_clicked(self, row: int, col: int) -> None:
-        if col == 3:
+        if col == 4:
             return
         self._edit_row(row)
 
@@ -409,16 +440,17 @@ class _MonthlyControl(QWidget):
         self._rows.clear()
         self._monthly_hints.clear()
         ym = self.ano_mes()
-        items = fixed_expenses_service.list_active()
+        raw = [fe for fe in fixed_expenses_service.list_active() if fe.id is not None]
+
+        def sort_key(fe: FixedExpense) -> tuple[int, int]:
+            assert fe.id is not None
+            pago = fixed_expenses_service.is_paid(fe.id, ym)
+            due = _fixed_due_date_for_month(ym, fe.dia_referencia)
+            return (0 if pago else 1, due.toJulianDay())
+
+        items = sorted(raw, key=sort_key)
         self.tbl.setRowCount(len(items))
         for i, fe in enumerate(items):
-            if fe.id is None:
-                continue
-
-            it_nome = QTableWidgetItem(fe.nome)
-            it_nome.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
-            self.tbl.setItem(i, 0, it_nome)
-
             pago_row = fixed_expenses_service.is_paid(fe.id, ym)
             ve = (
                 fixed_expenses_service.get_valor_efetivo(fe.id, ym)
@@ -430,13 +462,22 @@ class _MonthlyControl(QWidget):
                 if ve is not None
                 else float(fe.valor_mensal)
             )
+
+            it_icon = QTableWidgetItem()
+            _apply_fixed_monthly_status_icon(it_icon, pago_row, ym, fe.dia_referencia)
+            self.tbl.setItem(i, 0, it_icon)
+
+            it_nome = QTableWidgetItem(fe.nome)
+            it_nome.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
+            self.tbl.setItem(i, 1, it_nome)
+
             it_val = QTableWidgetItem(format_currency(v_show))
             it_val.setTextAlignment(ReadOnlyTable.ALIGN_RIGHT)
-            self.tbl.setItem(i, 1, it_val)
+            self.tbl.setItem(i, 2, it_val)
 
             it_dia = QTableWidgetItem(str(fe.dia_referencia))
             it_dia.setTextAlignment(ReadOnlyTable.ALIGN_CENTER)
-            self.tbl.setItem(i, 2, it_dia)
+            self.tbl.setItem(i, 3, it_dia)
 
             cb = QComboBox()
             cb.addItems(["Pendente", "Pago"])
@@ -471,6 +512,7 @@ class _MonthlyControl(QWidget):
                             competencia,
                             pago=True,
                             valor_efetivo=dlg.valor_efetivo(),
+                            conta_debito_id=dlg.conta_debito_para_livro(),
                         )
                     else:
                         fixed_expenses_service.set_month_status(
@@ -478,7 +520,7 @@ class _MonthlyControl(QWidget):
                         )
                     self.data_changed.emit()
                     self._reload_projection()
-                    self._refresh_monthly_kpis()
+                    self._reload_table()
 
                 return on_change
 
@@ -489,7 +531,7 @@ class _MonthlyControl(QWidget):
             status_lay.setContentsMargins(6, 2, 6, 2)
             status_lay.setSpacing(0)
             status_lay.addWidget(cb, 1, Qt.AlignmentFlag.AlignVCenter)
-            self.tbl.setCellWidget(i, 3, status_cell)
+            self.tbl.setCellWidget(i, 4, status_cell)
             self._rows.append((fid, cb))
 
             st_txt = "pago" if pago_row else "pendente"
