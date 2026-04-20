@@ -51,15 +51,19 @@ class DashboardData:
 
 
 def cost_of_living(ano_mes: str) -> float:
-    """Custo total do mês: avulsos em conta, faturas de cartão (sem somar compras duas vezes),
-    parcelas em conta, assinaturas em conta e gastos fixos ativos."""
+    """Comprometimento do mês (previsto): avulsos em conta, faturas de cartão (sem somar compras
+    duas vezes), parcelas e assinaturas em conta pendentes na competência, fixos ativos ainda não
+    pagos no mês. Inclui todos os pagamentos em conta do mês (tabela ``payments``), não exclui
+    quem já tem espelho no livro-caixa — o ``previsto_breakdown`` é que evita duplicar com o
+    livro para o card de previsto."""
     with transaction() as conn:
         row = conn.execute(
             """
-            SELECT COALESCE(SUM(valor), 0) AS t
-              FROM payments
-             WHERE substr(data, 1, 7) = ?
-               AND cartao_id IS NULL
+            SELECT COALESCE(SUM(p.valor), 0) AS t
+              FROM payments p
+             WHERE substr(p.data, 1, 7) = ?
+               AND p.cartao_id IS NULL
+               AND p.conta_id IS NOT NULL
             """,
             (ano_mes,),
         ).fetchone()
@@ -67,31 +71,42 @@ def cost_of_living(ano_mes: str) -> float:
 
         row = conn.execute(
             """
-            SELECT COALESCE(SUM(valor_mensal), 0) AS t
-              FROM subscriptions
-             WHERE status = 'ativa'
-               AND card_id IS NULL
-            """
+            SELECT COALESCE(SUM(s.valor_mensal), 0) AS t
+              FROM subscriptions s
+             WHERE s.status = 'ativa'
+               AND s.card_id IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM subscription_months sm
+                    WHERE sm.subscription_id = s.id
+                      AND sm.ano_mes = ?
+                      AND sm.status = 'pago'
+               )
+            """,
+            (ano_mes,),
         ).fetchone()
         assinaturas_conta = float(row["t"] or 0)
 
         row = conn.execute(
             """
-            SELECT COALESCE(SUM(valor_parcela), 0) AS t
-              FROM installments
-             WHERE status = 'ativo'
-               AND cartao_id IS NULL
-               AND mes_referencia = ?
+            SELECT COALESCE(SUM(i.valor_parcela), 0) AS t
+              FROM installments i
+             WHERE i.status = 'ativo'
+               AND i.cartao_id IS NULL
+               AND i.mes_referencia = ?
+               AND NOT EXISTS (
+                   SELECT 1 FROM installment_months im
+                    WHERE im.installment_id = i.id
+                      AND im.ano_mes = ?
+                      AND im.status = 'pago'
+               )
             """,
-            (ano_mes,),
+            (ano_mes, ano_mes),
         ).fetchone()
         parcelas_conta = float(row["t"] or 0)
 
-        row = conn.execute(
-            "SELECT COALESCE(SUM(valor_mensal), 0) AS t FROM fixed_expenses WHERE ativo = 1"
-        ).fetchone()
-        fixos = float(row["t"] or 0)
+    fixos = fixed_expenses_service.sum_unpaid_for_month(ano_mes)
 
+    with transaction() as conn:
         faturas_cartao = 0.0
         for cr in conn.execute("SELECT id FROM cards").fetchall():
             cid = int(cr["id"])
@@ -185,32 +200,50 @@ def previsto_breakdown_for(ano_mes: str) -> PrevistoMesBreakdown:
     with transaction() as conn:
         row = conn.execute(
             """
-            SELECT COALESCE(SUM(valor_mensal), 0) AS total
-              FROM subscriptions
-             WHERE status = 'ativa'
-               AND card_id IS NULL
-            """
+            SELECT COALESCE(SUM(s.valor_mensal), 0) AS total
+              FROM subscriptions s
+             WHERE s.status = 'ativa'
+               AND s.card_id IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM subscription_months sm
+                    WHERE sm.subscription_id = s.id
+                      AND sm.ano_mes = ?
+                      AND sm.status = 'pago'
+               )
+            """,
+            (ano_mes,),
         ).fetchone()
         assinaturas_conta = float(row["total"] or 0)
 
         row = conn.execute(
             """
-            SELECT COALESCE(SUM(valor_parcela), 0) AS total
-              FROM installments
-             WHERE status = 'ativo'
-               AND cartao_id IS NULL
-               AND mes_referencia = ?
+            SELECT COALESCE(SUM(i.valor_parcela), 0) AS total
+              FROM installments i
+             WHERE i.status = 'ativo'
+               AND i.cartao_id IS NULL
+               AND i.mes_referencia = ?
+               AND NOT EXISTS (
+                   SELECT 1 FROM installment_months im
+                    WHERE im.installment_id = i.id
+                      AND im.ano_mes = ?
+                      AND im.status = 'pago'
+               )
             """,
-            (ano_mes,),
+            (ano_mes, ano_mes),
         ).fetchone()
         parcelas_conta = float(row["total"] or 0)
 
         row = conn.execute(
             """
-            SELECT COALESCE(SUM(valor), 0) AS total
-              FROM payments
-             WHERE substr(data, 1, 7) = ?
-               AND cartao_id IS NULL
+            SELECT COALESCE(SUM(p.valor), 0) AS total
+              FROM payments p
+             WHERE substr(p.data, 1, 7) = ?
+               AND p.cartao_id IS NULL
+               AND p.conta_id IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM account_transactions t
+                    WHERE t.transaction_key = ('payment:' || p.id)
+               )
             """,
             (ano_mes,),
         ).fetchone()
@@ -333,9 +366,14 @@ def load(mes: str | None = None) -> DashboardData:
     data.total_investido = investments_service.total_aplicado()
 
     data.saldo_em_contas = accounts_service.sum_balances()
-    data.saldo_projetado_fim_mes = round(
-        data.renda_mensal_total + data.saldo_em_contas - data.previsto_mes,
-        2,
-    )
+    if mes == current_month():
+        renda_pendente = income_sources_service.sum_expected_receipts_rest_of_month(mes)
+        data.saldo_projetado_fim_mes = round(
+            data.saldo_em_contas + renda_pendente - data.previsto_mes,
+            2,
+        )
+    else:
+        # Saldo em contas é até hoje; misturar com previsto/renda de outro mês distorce o KPI.
+        data.saldo_projetado_fim_mes = 0.0
 
     return data

@@ -90,10 +90,9 @@ def plot(ax) -> None:
         leg.get_frame().set_linewidth(0.8)
 
     ax.set_title(
-        "Custo de vida — últimos 6 meses\n"
-        "(meses passados: realizado; mês atual: previsto — mesma fórmula do card «Gasto previsto no mês»)",
-        fontsize=10,
-        pad=10,
+        "Custo de vida — últimos 6 meses (realizado / previsto)",
+        fontsize=9,
+        pad=6,
     )
     ax.yaxis.set_major_formatter(
         FuncFormatter(lambda v, _: format_currency_short(v))

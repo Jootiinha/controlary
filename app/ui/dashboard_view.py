@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QScrollArea,
@@ -19,7 +20,12 @@ from app.services.calendar_service import CalendarEvent
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.chart_canvas import ChartCanvas
 from app.ui.widgets.readonly_table import ReadOnlyTable
-from app.utils.formatting import format_currency, format_date_br, format_month_br
+from app.utils.formatting import (
+    current_month,
+    format_currency,
+    format_date_br,
+    format_month_br,
+)
 
 
 _CARD_MIN_W = 168
@@ -70,46 +76,69 @@ class DashboardView(QWidget):
         )
         self.card_saldo_fim_mes = KpiCard(
             "Saldo fim do mês (est.)",
-            subtitle="Renda mensal + saldos em contas − gasto previsto no mês",
+            subtitle="Saldo em contas + renda pendente − gasto previsto (mês corrente)",
             compact=True,
         )
         self.card_saldo_fim_mes.setToolTip(
-            "Estimativa: soma da renda mensal (fontes ativas no mês) com os saldos "
-            "atuais em conta corrente, menos o gasto previsto do mês (mesmo total do "
-            "card «Gasto previsto no mês»)."
+            "No mês corrente: saldos em conta hoje, mais renda ainda não marcada como "
+            "recebida, menos o gasto previsto (faturas em aberto, assinaturas e parcelas "
+            "em conta não pagas, fixos pendentes e lançamentos em conta sem débito no "
+            "livro-caixa). Evita dupla contagem com o que já entrou no saldo."
         )
 
-        kpi_grid = QGridLayout()
-        kpi_grid.setContentsMargins(0, 0, 0, 0)
-        kpi_grid.setHorizontalSpacing(12)
-        kpi_grid.setVerticalSpacing(12)
+        flux_grid = QGridLayout()
+        flux_grid.setContentsMargins(0, 0, 0, 0)
+        flux_grid.setHorizontalSpacing(12)
+        flux_grid.setVerticalSpacing(12)
         for c in range(_KPI_COLS):
-            kpi_grid.setColumnMinimumWidth(c, _CARD_MIN_W)
-            kpi_grid.setColumnStretch(c, 1)
+            flux_grid.setColumnMinimumWidth(c, _CARD_MIN_W)
+            flux_grid.setColumnStretch(c, 1)
         align = Qt.AlignmentFlag.AlignTop
-        kpi_grid.addWidget(self.card_renda, 0, 0, 1, 1, align)
-        kpi_grid.addWidget(self.card_gasto_previsto_mes, 0, 1, 1, 2, align)
-        kpi_grid.addWidget(self.card_margem_previsto, 0, 3, 1, 1, align)
-        kpi_grid.addWidget(self.card_invest, 1, 0, 1, 1, align)
-        kpi_grid.addWidget(self.card_fixos_mes, 1, 1, 1, 1, align)
-        kpi_grid.addWidget(self.card_assinaturas, 1, 2, 1, 2, align)
-        # Terceira linha: só 2 KPIs — cada um ocupa 2 colunas para não deixar metade da faixa vazia
-        kpi_grid.addWidget(self.card_saldo_contas, 2, 0, 1, 2, align)
-        kpi_grid.addWidget(self.card_saldo_fim_mes, 2, 2, 1, 2, align)
+        flux_grid.addWidget(self.card_renda, 0, 0, 1, 1, align)
+        flux_grid.addWidget(self.card_gasto_previsto_mes, 0, 1, 1, 2, align)
+        flux_grid.addWidget(self.card_margem_previsto, 0, 3, 1, 1, align)
+
+        comp_grid = QGridLayout()
+        comp_grid.setContentsMargins(0, 0, 0, 0)
+        comp_grid.setHorizontalSpacing(12)
+        comp_grid.setVerticalSpacing(12)
+        for c in range(_KPI_COLS):
+            comp_grid.setColumnMinimumWidth(c, _CARD_MIN_W)
+            comp_grid.setColumnStretch(c, 1)
+        comp_grid.addWidget(self.card_invest, 0, 0, 1, 1, align)
+        comp_grid.addWidget(self.card_fixos_mes, 0, 1, 1, 1, align)
+        comp_grid.addWidget(self.card_assinaturas, 0, 2, 1, 2, align)
+        comp_grid.addWidget(self.card_saldo_contas, 1, 0, 1, 2, align)
+        comp_grid.addWidget(self.card_saldo_fim_mes, 1, 2, 1, 2, align)
+
+        grp_fluxo = QGroupBox("Fluxo do mês")
+        grp_fluxo.setLayout(flux_grid)
+        grp_comp = QGroupBox("Compromissos e patrimônio")
+        grp_comp.setLayout(comp_grid)
+
+        kpi_outer = QVBoxLayout()
+        kpi_outer.setContentsMargins(0, 0, 0, 0)
+        kpi_outer.setSpacing(12)
+        kpi_outer.addWidget(grp_fluxo)
+        kpi_outer.addWidget(grp_comp)
 
         kpi_wrap = QWidget()
-        kpi_wrap.setLayout(kpi_grid)
+        kpi_wrap.setLayout(kpi_outer)
         kpi_wrap.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Fixed,
         )
 
-        self.lbl_venc = QLabel(
-            f"Próximos vencimentos (próx. {calendar_service.UPCOMING_HORIZON_DAYS} dias)"
-        )
-        self.lbl_venc.setObjectName("PageSubtitle")
         self.tbl_venc = ReadOnlyTable(
             ["Data", "Tipo", "Descrição", "Valor"],
+            fixed_height=160,
+            size_policy=(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            ),
+        )
+        self.tbl_entradas = ReadOnlyTable(
+            ["Data", "Descrição", "Valor"],
             fixed_height=160,
             size_policy=(
                 QSizePolicy.Policy.Expanding,
@@ -122,11 +151,23 @@ class DashboardView(QWidget):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Fixed,
         )
-        venc_lay = QVBoxLayout(venc_wrap)
+        venc_lay = QHBoxLayout(venc_wrap)
         venc_lay.setContentsMargins(0, 0, 0, 0)
-        venc_lay.setSpacing(6)
-        venc_lay.addWidget(self.lbl_venc)
-        venc_lay.addWidget(self.tbl_venc)
+        venc_lay.setSpacing(14)
+        venc_lay.addWidget(
+            self._titled(
+                f"Próximos vencimentos (próx. {calendar_service.UPCOMING_HORIZON_DAYS} dias)",
+                self.tbl_venc,
+            ),
+            1,
+        )
+        venc_lay.addWidget(
+            self._titled(
+                f"Próximas entradas (próx. {calendar_service.UPCOMING_HORIZON_DAYS} dias)",
+                self.tbl_entradas,
+            ),
+            1,
+        )
 
         self.chart_month_compare = ChartCanvas(
             month_compare.plot,
@@ -249,20 +290,33 @@ class DashboardView(QWidget):
         self.card_renda.set_value(format_currency(data.renda_mensal_total))
         self.card_gasto_previsto_mes.set_value(format_currency(data.previsto_mes))
         self.card_gasto_previsto_mes.set_subtitle(
-            f"Já lançado em pagamentos: {format_currency(data.total_gasto_mes)}"
+            f"Já lançado em Lançamentos: {format_currency(data.total_gasto_mes)}"
         )
         self.card_gasto_previsto_mes.setToolTip(
-            "Total previsto para o mês: faturas de cartão em aberto (valor registrado "
-            "ou sugerido), assinaturas em conta, parcelas sem cartão no mês, fixos "
-            "pendentes e lançamentos avulsos em conta (pagamentos sem cartão). "
-            "O subtítulo é a soma já lançada em Pagamentos (todos os meios). "
-            "Se o mesmo gasto estiver como assinatura/fixo e também em Pagamentos, "
-            "pode haver sobreposição no previsto."
+            "Previsto estruturado-first: faturas de cartão em aberto (valor ou sugerido), "
+            "assinaturas em conta ainda não pagas no mês, parcelas em conta pendentes, "
+            "fixos pendentes e apenas lançamentos em conta sem débito correspondente "
+            "no livro-caixa (evita duplicar com o que já saiu do saldo)."
         )
         self.card_margem_previsto.set_value(format_currency(data.margem_apos_previsto))
 
         self.card_saldo_contas.set_value(format_currency(data.saldo_em_contas))
-        self.card_saldo_fim_mes.set_value(format_currency(data.saldo_projetado_fim_mes))
+        if data.mes_referencia == current_month():
+            self.card_saldo_fim_mes.set_value(
+                format_currency(data.saldo_projetado_fim_mes)
+            )
+            self.card_saldo_fim_mes.setToolTip(
+                "No mês corrente: saldos em conta hoje, mais renda ainda não marcada como "
+                "recebida, menos o gasto previsto (faturas em aberto, assinaturas e parcelas "
+                "em conta não pagas, fixos pendentes e lançamentos em conta sem débito no "
+                "livro-caixa). Evita dupla contagem com o que já entrou no saldo."
+            )
+        else:
+            self.card_saldo_fim_mes.set_value("—")
+            self.card_saldo_fim_mes.setToolTip(
+                "Projeção de saldo ao fim do mês só está disponível para o mês de referência "
+                "corrente (saldo em contas reflete a data de hoje)."
+            )
 
         self.card_invest.set_value(format_currency(data.total_investido))
         self.card_invest.set_subtitle(
@@ -291,6 +345,11 @@ class DashboardView(QWidget):
         self._fill_table(data.gastos_por_conta, self.tbl_contas)
         self._fill_table(data.gastos_por_forma, self.tbl_formas)
         self._fill_vencimentos(data.proximos_vencimentos)
+        self._fill_entradas(
+            calendar_service.upcoming_receivables(
+                calendar_service.UPCOMING_HORIZON_DAYS
+            )
+        )
 
         self.chart_month_compare.refresh()
         self.chart_cost_12m.refresh()
@@ -341,5 +400,27 @@ class DashboardView(QWidget):
                     float(ev.valor),
                 ]
                 for ev in rows
+            ],
+        )
+
+    def _fill_entradas(self, rows: list[CalendarEvent]) -> None:
+        tbl = self.tbl_entradas
+        if not rows:
+            tbl.set_rows(
+                [],
+                empty_row=["—", "Nada neste período", "—"],
+            )
+            return
+        tbl.set_rows(
+            [
+                [
+                    format_date_br(ev.data),
+                    ev.titulo,
+                    format_currency(ev.valor),
+                ]
+                for ev in rows
+            ],
+            sort_keys=[
+                [ev.data, (ev.titulo or "").casefold(), float(ev.valor)] for ev in rows
             ],
         )

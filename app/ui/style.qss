@@ -119,6 +119,54 @@ QLabel#PageSubtitle {
     font-size: 12px;
 }
 
+/* Página com vários gráficos empilhados: título mais compacto */
+QWidget#ChartsPage QLabel#PageTitle {
+    font-size: 17px;
+}
+QWidget#ChartsPage QLabel#PageSubtitle {
+    font-size: 11px;
+}
+
+QLabel#FormHint {
+    color: #6B7280;
+    font-size: 12px;
+}
+
+QLabel#PositiveDelta {
+    color: #15803d;
+    font-weight: 600;
+}
+
+QLabel#NegativeDelta {
+    color: #b91c1c;
+    font-weight: 600;
+}
+
+QGroupBox {
+    font-weight: 600;
+    color: #111827;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    margin-top: 10px;
+    padding: 12px 8px 8px 8px;
+    background-color: #ffffff;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 12px;
+    padding: 0 4px;
+}
+
+QFrame#KpiCardCompact[kpiTrend="positive"] QLabel#KpiValue {
+    color: #15803d;
+}
+
+QFrame#KpiCardCompact[kpiTrend="negative"] QLabel#KpiValue {
+    color: #b91c1c;
+}
+
 QPushButton {
     background-color: #FFFFFF;
     border: 1px solid #D1D5DB;

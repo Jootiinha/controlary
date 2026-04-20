@@ -34,8 +34,9 @@ def plot(ax) -> None:
     ax.set_ylabel("% da renda")
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.0f}%"))
     ax.set_title(
-        "Comprometimento: despesas / renda\n"
-        "(passado: realizado · futuro: previsto do mês)"
+        "Despesas ÷ renda (% · passado realizado, futuro previsto)",
+        fontsize=9,
+        pad=8,
     )
     ax.set_ylim(0, max(pct + [5]) * 1.1)
     ax.grid(True, axis="y", alpha=0.25)

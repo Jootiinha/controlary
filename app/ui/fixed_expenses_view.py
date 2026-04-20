@@ -32,7 +32,7 @@ from app.models.fixed_expense import FixedExpense
 from app.services import accounts_service, fixed_expenses_service, payments_service
 from app.ui.categories_view import CategoryDialog
 from app.ui.widgets.card import KpiCard
-from app.ui.widgets.category_picker import CategoryPicker
+from app.ui.widgets.category_picker import CategoryPicker, emit_parent_view_data_changed
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.readonly_table import ReadOnlyTable
 from app.ui.widgets.form_dialog import FormDialog
@@ -141,6 +141,7 @@ class FixedExpenseDialog(FormDialog):
 
             categories_service.create(dlg.payload())
             self._picker_cat.reload_from_db()
+            emit_parent_view_data_changed(self)
 
     def _fill_contas(self) -> None:
         self.cmb_conta.clear()

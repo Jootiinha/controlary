@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS income_months (
     ano_mes          TEXT    NOT NULL,
     status           TEXT    NOT NULL DEFAULT 'pendente',
     recebido_em      TEXT,
+    valor_efetivo    REAL,
     PRIMARY KEY (income_source_id, ano_mes),
     CHECK (status IN ('pendente', 'recebido'))
 );

@@ -143,9 +143,15 @@ def update(payment: Payment) -> None:
         raise ValueError("Pagamento sem id não pode ser atualizado")
     _validate_origin(payment)
     with transaction() as conn:
-        accounts_service.remove_transaction_key(
-            accounts_service.transaction_key_payment(payment.id), conn=conn
+        key = accounts_service.transaction_key_payment(payment.id)
+        had_ledger = (
+            conn.execute(
+                "SELECT 1 FROM account_transactions WHERE transaction_key = ?",
+                (key,),
+            ).fetchone()
+            is not None
         )
+        accounts_service.remove_transaction_key(key, conn=conn)
         if payment.conta_id is not None:
             row = conn.execute(
                 "SELECT nome FROM accounts WHERE id = ?", (payment.conta_id,)
@@ -175,15 +181,16 @@ def update(payment: Payment) -> None:
             desc = payment.descricao
             if desc and len(desc) > 500:
                 desc = desc[:500]
-            accounts_service.upsert_transaction(
-                int(payment.conta_id),
-                -float(payment.valor),
-                payment.data,
-                "pagamento",
-                accounts_service.transaction_key_payment(payment.id),
-                desc,
-                conn=conn,
-            )
+            if had_ledger:
+                accounts_service.upsert_transaction(
+                    int(payment.conta_id),
+                    -float(payment.valor),
+                    payment.data,
+                    "pagamento",
+                    accounts_service.transaction_key_payment(payment.id),
+                    desc,
+                    conn=conn,
+                )
             return
         row = conn.execute(
             "SELECT nome FROM cards WHERE id = ?", (payment.cartao_id,)

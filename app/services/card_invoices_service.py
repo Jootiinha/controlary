@@ -226,9 +226,17 @@ def mark_paid(
                 f"Fatura {inv_row['ano_mes']}",
                 conn=conn,
             )
-    inst_ids = installments_service.list_active_ids_for_card_month(cartao_id, ano_mes)
-    for iid in inst_ids:
-        installments_service.increment_paid(iid, 1)
+        rows_inst = conn.execute(
+            """
+            SELECT id FROM installments
+             WHERE status = 'ativo'
+               AND cartao_id = ?
+               AND mes_referencia = ?
+            """,
+            (cartao_id, ano_mes),
+        ).fetchall()
+        for r in rows_inst:
+            installments_service.increment_paid_in_connection(conn, int(r["id"]), 1)
 
 
 def set_status(invoice_id: int, status: str) -> None:
@@ -282,4 +290,33 @@ def list_all_cards_with_invoice_hint(ano_mes: str) -> list[dict[str, Any]]:
                 "contained_count": cnt,
             }
         )
+    return out
+
+
+def history_by_card(
+    start_ym: str, end_ym: str
+) -> dict[int, list[tuple[str, float]]]:
+    """Por cartão, lista de (ano_mes, valor_total) no intervalo [start_ym, end_ym].
+
+    Só faturas com status ``fechada`` ou ``paga`` e ``valor_total > 0``.
+    Cada lista está ordenada por ``ano_mes`` ascendente.
+    """
+    with transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT cartao_id, ano_mes, valor_total
+              FROM card_invoices
+             WHERE ano_mes BETWEEN ? AND ?
+               AND status IN ('fechada', 'paga')
+               AND valor_total > 0
+             ORDER BY cartao_id, ano_mes
+            """,
+            (start_ym, end_ym),
+        ).fetchall()
+    out: dict[int, list[tuple[str, float]]] = {}
+    for r in rows:
+        cid = int(r["cartao_id"])
+        ym = str(r["ano_mes"])
+        v = float(r["valor_total"] or 0.0)
+        out.setdefault(cid, []).append((ym, round(v, 2)))
     return out

@@ -11,10 +11,13 @@ import mplcursors
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle, Wedge
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg  # noqa: E402
+from matplotlib.axes import Axes  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 from PySide6.QtWidgets import QSizePolicy
 
 from app.utils.formatting import format_currency
+
+_MIN_TITLE_PAD_PT = 18.0
 
 HoverFormatFn = Callable[[Any, Any, int | None], str]
 
@@ -64,7 +67,6 @@ def _default_hover_text(ax, sel: mplcursors.Selection) -> str:
     if isinstance(artist, Wedge):
         wedges = [p for p in ax.patches if isinstance(p, Wedge)]
         if artist in wedges:
-            i = wedges.index(artist)
             total = sum(w.theta2 - w.theta1 for w in wedges) or 1.0
             frac = (artist.theta2 - artist.theta1) / total
             return f"{frac * 100:.1f}%"
@@ -83,6 +85,20 @@ def _collect_hover_artists(ax) -> list[Any]:
     return out
 
 
+def _ensure_title_spacing(ax: Axes, *, min_pad_pt: float = _MIN_TITLE_PAD_PT) -> None:
+    title_text = ax.get_title()
+    if not title_text:
+        return
+    ttl = ax.title
+    ax.set_title(
+        title_text,
+        fontsize=ttl.get_fontsize(),
+        fontweight=ttl.get_fontweight(),
+        color=ttl.get_color(),
+        pad=min_pad_pt,
+    )
+
+
 class ChartCanvas(FigureCanvasQTAgg):
     def __init__(
         self,
@@ -94,6 +110,7 @@ class ChartCanvas(FigureCanvasQTAgg):
         # "constrained" evita cortar título/legendas como o tight_layout(rect=...) costumava fazer
         self._figure = Figure(figsize=(width, height), dpi=dpi, layout="constrained")
         self._figure.patch.set_facecolor("#FFFFFF")
+        self._figure.get_layout_engine().set(h_pad=0.1, w_pad=0.055)
         super().__init__(self._figure)
         self.setMinimumSize(200, 160)
         self.setSizePolicy(
@@ -136,11 +153,13 @@ class ChartCanvas(FigureCanvasQTAgg):
     def refresh(self) -> None:
         self._remove_hover_cursor()
         self._figure.clear()
+        self._figure.get_layout_engine().set(h_pad=0.1, w_pad=0.055)
         ax = self._figure.add_subplot(111)
         ax.set_facecolor("#FFFFFF")
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
         if self._renderer is not None:
             self._renderer(ax)
+            _ensure_title_spacing(ax)
         self._attach_hover_cursor(ax)
         self.draw_idle()

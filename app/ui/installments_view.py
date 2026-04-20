@@ -31,7 +31,7 @@ from app.services import (
 )
 from app.ui.categories_view import CategoryDialog
 from app.ui.widgets.card import KpiCard
-from app.ui.widgets.category_picker import CategoryPicker
+from app.ui.widgets.category_picker import CategoryPicker, emit_parent_view_data_changed
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.readonly_table import ReadOnlyTable
 from app.ui.widgets.form_dialog import FormDialog
@@ -77,7 +77,7 @@ class InstallmentDialog(FormDialog):
         self.ed_obs.setFixedHeight(70)
 
         self.lbl_calc = QLabel()
-        self.lbl_calc.setStyleSheet("color: #6B7280;")
+        self.lbl_calc.setObjectName("FormHint")
 
         self.form.addRow("Nome *", self.ed_nome)
         self.form.addRow("Cartão ou conta *", self.ed_origem)
@@ -99,7 +99,7 @@ class InstallmentDialog(FormDialog):
             try:
                 year, month = installment.mes_referencia.split("-")
                 self.ed_mes.setDate(QDate(int(year), int(month), 1))
-            except Exception:
+            except (ValueError, TypeError, AttributeError):
                 pass
             self.ed_valor_parcela.setValue(installment.valor_parcela)
             self.ed_total.setValue(installment.total_parcelas)
@@ -133,6 +133,7 @@ class InstallmentDialog(FormDialog):
 
             categories_service.create(dlg.payload())
             self._picker_cat.reload_from_db()
+            emit_parent_view_data_changed(self)
 
     def _fill_origem(self) -> None:
         self.ed_origem.clear()
@@ -145,16 +146,17 @@ class InstallmentDialog(FormDialog):
                 self.ed_origem.addItem(f"Conta · {a.nome}", f"a:{a.id}")
 
     def _update_calc(self) -> None:
+        from app.services import installments_service
+
         total = self.ed_total.value()
         pagas = self.ed_pagas.value()
         if pagas > total:
             self.ed_pagas.setValue(total)
             pagas = total
         valor = self.ed_valor_parcela.value()
-        restantes = total - pagas
-        valor_total = valor * total
-        saldo = valor * restantes
-        status = "quitado" if pagas >= total else "ativo"
+        valor_total, restantes, saldo, status = installments_service.preview_parcelamento(
+            float(valor), int(total), int(pagas)
+        )
         self.lbl_calc.setText(
             f"Total: {format_currency(valor_total)}  ·  "
             f"Restantes: {restantes}  ·  "

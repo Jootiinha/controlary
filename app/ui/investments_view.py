@@ -26,7 +26,7 @@ from app.charts import investment_evolution_overview
 from app.models.investment import Investment
 from app.services import accounts_service, investments_service
 from app.ui.categories_view import CategoryDialog
-from app.ui.widgets.category_picker import CategoryPicker
+from app.ui.widgets.category_picker import CategoryPicker, emit_parent_view_data_changed
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.chart_canvas import ChartCanvas
 from app.ui.widgets.crud_page import CrudPage
@@ -46,19 +46,15 @@ def _fmt_pct_carteira(pct: float | None) -> str:
 
 
 def _kpi_carteira_style(card: KpiCard, signed: float | None) -> None:
-    if signed is None:
-        card.setStyleSheet("")
-        return
-    if signed > 0:
-        card.setStyleSheet(
-            "QFrame#KpiCardCompact QLabel#KpiValue { color: #15803d; }"
-        )
-    elif signed < 0:
-        card.setStyleSheet(
-            "QFrame#KpiCardCompact QLabel#KpiValue { color: #B91C1C; }"
-        )
+    if signed is None or signed == 0:
+        trend = "neutral"
+    elif signed > 0:
+        trend = "positive"
     else:
-        card.setStyleSheet("")
+        trend = "negative"
+    card.setProperty("kpiTrend", trend)
+    card.style().unpolish(card)
+    card.style().polish(card)
 
 
 class InvestmentDialog(FormDialog):
@@ -155,22 +151,27 @@ class InvestmentDialog(FormDialog):
     def _refresh_gain_label(self) -> None:
         if self._inv is None or self._inv.id is None:
             self._lbl_gain.setText("—")
+            self._lbl_gain.setObjectName("")
             self._lbl_gain.setStyleSheet("")
             return
         series = investments_service.evolution_series(self._inv.id)
         if not series:
             self._lbl_gain.setText("—")
+            self._lbl_gain.setObjectName("")
             self._lbl_gain.setStyleSheet("")
             return
         last_v = series[-1][1]
         gain = last_v - float(self.sp_valor.value())
         self._lbl_gain.setText(format_currency(gain))
+        self._lbl_gain.setStyleSheet("")
         if gain > 0:
-            self._lbl_gain.setStyleSheet("color: #15803d;")
+            self._lbl_gain.setObjectName("PositiveDelta")
         elif gain < 0:
-            self._lbl_gain.setStyleSheet("color: #B91C1C;")
+            self._lbl_gain.setObjectName("NegativeDelta")
         else:
-            self._lbl_gain.setStyleSheet("")
+            self._lbl_gain.setObjectName("")
+        self._lbl_gain.style().unpolish(self._lbl_gain)
+        self._lbl_gain.style().polish(self._lbl_gain)
 
     def _nova_cat(self) -> None:
         dlg = CategoryDialog(self)
@@ -179,6 +180,7 @@ class InvestmentDialog(FormDialog):
 
             categories_service.create(dlg.payload())
             self._picker_cat.reload_from_db()
+            emit_parent_view_data_changed(self)
 
     def validate(self) -> tuple[bool, str | None]:
         if self.cmb_banco.currentData() is None:

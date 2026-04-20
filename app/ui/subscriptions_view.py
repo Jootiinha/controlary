@@ -30,7 +30,7 @@ from app.services import (
 )
 from app.ui.categories_view import CategoryDialog
 from app.ui.widgets.card import KpiCard
-from app.ui.widgets.category_picker import CategoryPicker
+from app.ui.widgets.category_picker import CategoryPicker, emit_parent_view_data_changed
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.readonly_table import ReadOnlyTable
 from app.ui.widgets.form_dialog import FormDialog
@@ -72,7 +72,7 @@ class SubscriptionDialog(FormDialog):
 
         self.lbl_meio = QLabel()
         self.lbl_meio.setWordWrap(True)
-        self.lbl_meio.setStyleSheet("color: #6B7280;")
+        self.lbl_meio.setObjectName("FormHint")
 
         self.ed_status = QComboBox()
         self.ed_status.addItems(STATUS_ASSINATURA)
@@ -145,6 +145,7 @@ class SubscriptionDialog(FormDialog):
 
             categories_service.create(dlg.payload())
             self._picker_cat.reload_from_db()
+            emit_parent_view_data_changed(self)
 
     def _fill_meio(self) -> None:
         self.cmb_meio.clear()

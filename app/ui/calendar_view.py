@@ -7,7 +7,6 @@ from PySide6.QtCore import QDate, QLocale, Qt
 from PySide6.QtGui import QColor, QTextCharFormat
 from PySide6.QtWidgets import (
     QCalendarWidget,
-    QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,

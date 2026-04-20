@@ -94,17 +94,76 @@ def get(source_id: int) -> Optional[IncomeSource]:
     return IncomeSource.from_row(row) if row else None
 
 
-def paid_remaining(src: IncomeSource) -> tuple[float, float]:
+def paid_remaining(
+    src: IncomeSource, *, include_inactive: bool = True
+) -> tuple[float, float]:
     """Valor já recebido e valor restante para uma fonte avulsa/parcelada."""
     if src.id is None or src.tipo == "recorrente":
+        return 0.0, 0.0
+    if not include_inactive and not src.ativo:
         return 0.0, 0.0
     competencias = src.competencias()
     if not competencias:
         return 0.0, 0.0
-    received = income_months_service.count_received(src.id, competencias)
-    total = len(competencias)
-    valor = float(src.valor_mensal)
-    return round(received * valor, 2), round(max(total - received, 0) * valor, 2)
+    ph = ",".join("?" * len(competencias))
+    with transaction() as conn:
+        row = conn.execute(
+            f"""
+            SELECT COALESCE(SUM(COALESCE(im.valor_efetivo, i.valor_mensal)), 0) AS got
+              FROM income_months im
+              JOIN income_sources i ON i.id = im.income_source_id
+             WHERE im.income_source_id = ?
+               AND im.ano_mes IN ({ph})
+               AND im.status = 'recebido'
+            """,
+            (src.id, *competencias),
+        ).fetchone()
+        received_sum = float(row["got"] or 0)
+    total_expected = float(src.valor_mensal) * len(competencias)
+    remaining = max(total_expected - received_sum, 0.0)
+    return round(received_sum, 2), round(remaining, 2)
+
+
+def sum_received_for_month(ano_mes: str) -> float:
+    """Créditos de renda no livro-caixa no mês (origem = renda)."""
+    with transaction() as conn:
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(valor), 0) AS t
+              FROM account_transactions
+             WHERE origem = 'renda'
+               AND substr(data, 1, 7) = ?
+            """,
+            (ano_mes,),
+        ).fetchone()
+    return round(float(row["t"] or 0), 2)
+
+
+def list_renda_ledger_rows(limit: int = 400) -> list[tuple[str, float, str, str]]:
+    """Linhas para histórico: (data ISO, valor, descrição, conta)."""
+    with transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT at.data, at.valor, at.descricao, a.nome AS conta
+              FROM account_transactions at
+              JOIN accounts a ON a.id = at.account_id
+             WHERE at.origem = 'renda'
+             ORDER BY date(at.data) DESC, at.id DESC
+             LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    out: list[tuple[str, float, str, str]] = []
+    for r in rows:
+        out.append(
+            (
+                str(r["data"]),
+                float(r["valor"] or 0),
+                (r["descricao"] or "").strip(),
+                str(r["conta"] or ""),
+            )
+        )
+    return out
 
 
 def sum_for_month(mes: str) -> float:
@@ -123,17 +182,14 @@ def sum_active_monthly() -> float:
 
 
 def sum_expected_receipts_rest_of_month(ano_mes: str) -> float:
-    """Entradas ainda esperadas no mês: dia >= hoje e não marcadas como recebidas."""
+    """Entradas esperadas no mês civil corrente ainda não marcadas como recebidas (competência)."""
     today = date.today()
     cur_mes = f"{today.year:04d}-{today.month:02d}"
     if ano_mes != cur_mes:
         return 0.0
-    d0 = today.day
     total = 0.0
     for src in list_all():
         if not applies_to_month(src, ano_mes):
-            continue
-        if int(src.dia_recebimento or 5) < d0:
             continue
         if src.id is None:
             continue

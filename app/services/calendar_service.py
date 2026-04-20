@@ -10,6 +10,7 @@ from app.services import (
     card_invoices_service,
     cards_service,
     fixed_expenses_service,
+    income_months_service,
     income_sources_service,
     installment_months_service,
     installments_service,
@@ -120,6 +121,7 @@ def events_for_month(ano: int, mes: int) -> list[CalendarEvent]:
         if not income_sources_service.applies_to_month(src, ano_mes):
             continue
         d = _data_com_dia(ano, mes, src.dia_recebimento)
+        pago = income_months_service.is_received(src.id, ano_mes)
         out.append(
             CalendarEvent(
                 data=d,
@@ -127,7 +129,7 @@ def events_for_month(ano: int, mes: int) -> list[CalendarEvent]:
                 valor=float(src.valor_mensal),
                 tipo="renda",
                 ref_id=src.id,
-                pago=False,
+                pago=pago,
             )
         )
 
@@ -136,7 +138,10 @@ def events_for_month(ano: int, mes: int) -> list[CalendarEvent]:
             continue
         if s.card_id is not None:
             continue
+        if s.id is None:
+            continue
         d = _data_com_dia(ano, mes, s.dia_cobranca)
+        pago = subscription_months_service.is_paid(s.id, ano_mes)
         out.append(
             CalendarEvent(
                 data=d,
@@ -144,7 +149,7 @@ def events_for_month(ano: int, mes: int) -> list[CalendarEvent]:
                 valor=float(s.valor_mensal),
                 tipo="assinatura",
                 ref_id=s.id,
-                pago=False,
+                pago=pago,
             )
         )
 
@@ -181,8 +186,11 @@ def events_for_month(ano: int, mes: int) -> list[CalendarEvent]:
             continue
         if inst.cartao_id is not None:
             continue
+        if inst.id is None:
+            continue
         d = date(ano, mes, PARCELA_FALLBACK_DIA)
         titulo = f"{inst.nome_fatura} — parcela"
+        pago = installment_months_service.is_paid(inst.id, ano_mes)
         out.append(
             CalendarEvent(
                 data=d,
@@ -190,7 +198,7 @@ def events_for_month(ano: int, mes: int) -> list[CalendarEvent]:
                 valor=float(inst.valor_parcela),
                 tipo="parcela",
                 ref_id=inst.id,
-                pago=False,
+                pago=pago,
             )
         )
 
@@ -224,6 +232,25 @@ def events_for_month(ano: int, mes: int) -> list[CalendarEvent]:
             )
         )
 
+    out.sort(
+        key=lambda e: (e.data, _TIPO_ORDEM[e.tipo], e.titulo.casefold())
+    )
+    return out
+
+
+def upcoming_receivables(horizon_days: int = UPCOMING_HORIZON_DAYS) -> list[CalendarEvent]:
+    today = date.today()
+    end = today + timedelta(days=horizon_days)
+    out: list[CalendarEvent] = []
+    for y, m in _months_from_until(today, end):
+        for ev in events_for_month(y, m):
+            if ev.tipo != "renda":
+                continue
+            if ev.data < today or ev.data > end:
+                continue
+            if ev.pago:
+                continue
+            out.append(ev)
     out.sort(
         key=lambda e: (e.data, _TIPO_ORDEM[e.tipo], e.titulo.casefold())
     )

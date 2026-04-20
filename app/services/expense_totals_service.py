@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from app.database.connection import transaction
-from app.services import accounts_service
 
 
 def total_despesa_mes(ano_mes: str) -> float:
@@ -10,14 +9,25 @@ def total_despesa_mes(ano_mes: str) -> float:
     mais compras no cartão com data nesse mês.
 
     O livro-caixa inclui pagamentos em débito/conta, fixos marcados como pagos,
-    faturas de cartão quitadas pela conta, etc. Compras no cartão entram em
-    ``payments`` e normalmente só debitam a conta no pagamento da fatura
-    (outro mês). Transferências ou ajustes manuais contam como saída.
+    etc. Débitos ``origem = 'fatura'`` são excluídos daqui para evitar dupla
+    contagem com ``payments`` no cartão no mesmo mês civil. Compras no cartão
+    entram em ``payments`` e normalmente só debitam a conta no pagamento da
+    fatura (outro mês). Transferências ou ajustes manuais contam como saída.
     """
-    debits_sum = accounts_service.sum_debits_in_month(ano_mes)
-    caixa = abs(float(debits_sum))
     with transaction() as conn:
         row = conn.execute(
+            """
+            SELECT COALESCE(SUM(valor), 0) AS t
+              FROM account_transactions
+             WHERE substr(data, 1, 7) = ?
+               AND valor < 0
+               AND COALESCE(origem, '') != 'fatura'
+            """,
+            (ano_mes,),
+        ).fetchone()
+    caixa = abs(float(row["t"] or 0))
+    with transaction() as conn:
+        row2 = conn.execute(
             """
             SELECT COALESCE(SUM(valor), 0) AS t
               FROM payments
@@ -26,5 +36,5 @@ def total_despesa_mes(ano_mes: str) -> float:
             """,
             (ano_mes,),
         ).fetchone()
-    cartao = float(row["t"] or 0)
+    cartao = float(row2["t"] or 0)
     return round(caixa + cartao, 2)

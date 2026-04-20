@@ -1,6 +1,7 @@
 """Operações sobre parcelamentos com cálculo automático de status."""
 from __future__ import annotations
 
+from sqlite3 import Connection
 from typing import List, Optional
 
 from app.database.connection import transaction
@@ -10,6 +11,19 @@ from app.services import accounts_service
 
 def _compute_status(parcelas_pagas: int, total_parcelas: int) -> str:
     return "quitado" if parcelas_pagas >= total_parcelas else "ativo"
+
+
+def preview_parcelamento(
+    valor_parcela: float, total_parcelas: int, parcelas_pagas: int
+) -> tuple[float, int, float, str]:
+    """Resumo para UI: (valor total contrato, parcelas restantes, saldo devedor, status)."""
+    tot = max(int(total_parcelas), 0)
+    pp = min(max(int(parcelas_pagas), 0), tot)
+    restantes = tot - pp
+    valor_total = round(float(valor_parcela) * tot, 2)
+    saldo = round(float(valor_parcela) * restantes, 2)
+    status = "quitado" if tot > 0 and pp >= tot else "ativo"
+    return valor_total, restantes, saldo, status
 
 
 def list_all() -> List[Installment]:
@@ -190,14 +204,32 @@ def list_active_ids_for_card_month(cartao_id: int, ano_mes: str) -> list[int]:
     return [int(r["id"]) for r in rows]
 
 
+def increment_paid_in_connection(
+    conn: Connection, installment_id: int, delta: int = 1
+) -> None:
+    """Atualiza parcelas_pagas/status na mesma conexão (ex.: dentro de transação maior)."""
+    row = conn.execute(
+        "SELECT parcelas_pagas, total_parcelas FROM installments WHERE id = ?",
+        (installment_id,),
+    ).fetchone()
+    if not row:
+        raise ValueError(f"Parcelamento {installment_id} não encontrado")
+    tot = int(row["total_parcelas"] or 0)
+    pp = int(row["parcelas_pagas"] or 0)
+    novo = max(0, min(tot, pp + delta))
+    status = _compute_status(novo, tot)
+    conn.execute(
+        """
+        UPDATE installments SET parcelas_pagas = ?, status = ? WHERE id = ?
+        """,
+        (novo, status, installment_id),
+    )
+
+
 def increment_paid(installment_id: int, delta: int = 1) -> None:
     """Incrementa (ou decrementa) parcelas_pagas respeitando limites."""
-    inst = get(installment_id)
-    if inst is None:
-        raise ValueError(f"Parcelamento {installment_id} não encontrado")
-    novo = max(0, min(inst.total_parcelas, inst.parcelas_pagas + delta))
-    inst.parcelas_pagas = novo
-    update(inst)
+    with transaction() as conn:
+        increment_paid_in_connection(conn, installment_id, delta)
 
 
 def delete(installment_id: int) -> None:

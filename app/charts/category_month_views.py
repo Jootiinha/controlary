@@ -219,9 +219,15 @@ def fetch_cost_of_living_by_category(ano_mes: str) -> list[tuple[str, float]]:
               LEFT JOIN categories cat ON cat.id = s.category_id
              WHERE s.status = 'ativa'
                AND s.card_id IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM subscription_months sm
+                    WHERE sm.subscription_id = s.id
+                      AND sm.ano_mes = ?
+                      AND sm.status = 'pago'
+               )
              GROUP BY COALESCE(cat.nome, ?)
             """,
-            (_CAT_OTHER, _CAT_OTHER),
+            (_CAT_OTHER, ano_mes, _CAT_OTHER),
         ).fetchall():
             v = float(r["t"] or 0)
             if v > 0:
@@ -236,9 +242,15 @@ def fetch_cost_of_living_by_category(ano_mes: str) -> list[tuple[str, float]]:
              WHERE i.status = 'ativo'
                AND i.cartao_id IS NULL
                AND i.mes_referencia = ?
+               AND NOT EXISTS (
+                   SELECT 1 FROM installment_months im
+                    WHERE im.installment_id = i.id
+                      AND im.ano_mes = ?
+                      AND im.status = 'pago'
+               )
              GROUP BY COALESCE(cat.nome, ?)
             """,
-            (_CAT_OTHER, ano_mes, _CAT_OTHER),
+            (_CAT_OTHER, ano_mes, ano_mes, _CAT_OTHER),
         ).fetchall():
             v = float(r["t"] or 0)
             if v > 0:
@@ -250,10 +262,13 @@ def fetch_cost_of_living_by_category(ano_mes: str) -> list[tuple[str, float]]:
                    COALESCE(SUM(f.valor_mensal), 0) AS t
               FROM fixed_expenses f
               LEFT JOIN categories cat ON cat.id = f.category_id
+              LEFT JOIN fixed_expense_months m
+                ON m.fixed_expense_id = f.id AND m.ano_mes = ?
              WHERE f.ativo = 1
+               AND COALESCE(m.status, 'pendente') != 'pago'
              GROUP BY COALESCE(cat.nome, ?)
             """,
-            (_CAT_OTHER, _CAT_OTHER),
+            (_CAT_OTHER, ano_mes, _CAT_OTHER),
         ).fetchall():
             v = float(r["t"] or 0)
             if v > 0:
@@ -332,8 +347,8 @@ def _render_pie(
     if not rows:
         ax.text(0.5, 0.5, "Sem dados para exibir", ha="center", va="center")
         ax.set_axis_off()
-        full = title if not subtitle else f"{title}\n{subtitle}"
-        ax.set_title(full, fontsize=10, pad=10)
+        full = f"{title} · {subtitle}" if subtitle else title
+        ax.set_title(full, fontsize=9, pad=6)
         return
 
     labels = [d[0] for d in rows]
@@ -367,8 +382,8 @@ def _render_pie(
         frameon=True,
     )
 
-    full_title = title if not subtitle else f"{title}\n{subtitle}"
-    ax.set_title(full_title, fontsize=10, pad=10)
+    full_title = f"{title} · {subtitle}" if subtitle else title
+    ax.set_title(full_title, fontsize=9, pad=6)
 
     def _hover_format(artist: Any, target: Any, index: int | None) -> str:
         if not isinstance(artist, Wedge):
@@ -399,8 +414,8 @@ def make_plot_ledger() -> Callable[..., None]:
         _render_pie(
             ax,
             data,
-            "Pago de fato — livro-caixa",
-            f"Mês {format_month_br(ano_mes)} · saídas registradas na conta",
+            "Livro-caixa por categoria",
+            format_month_br(ano_mes),
         )
 
     return plot
@@ -413,8 +428,8 @@ def make_plot_cost_of_living() -> Callable[..., None]:
         _render_pie(
             ax,
             data,
-            "Despesas do mês — composição de custo",
-            f"Mês {format_month_br(ano_mes)} · mesmo critério do custo total (dashboard)",
+            "Composição do custo",
+            format_month_br(ano_mes),
         )
 
     return plot

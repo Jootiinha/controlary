@@ -19,7 +19,7 @@ from app.models.payment import Payment
 from app.services import accounts_service, cards_service, payments_service
 from app.ui.categories_view import CategoryDialog
 from app.ui.widgets.card import KpiCard
-from app.ui.widgets.category_picker import CategoryPicker
+from app.ui.widgets.category_picker import CategoryPicker, emit_parent_view_data_changed
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.payment_confirmation_dialog import PaymentRecordedDialog
 from app.ui.widgets.form_dialog import FormDialog
@@ -63,7 +63,7 @@ class PaymentDialog(FormDialog):
             "o saldo só considera esse débito a partir dessa data."
         )
         self.lbl_data_hint.setWordWrap(True)
-        self.lbl_data_hint.setStyleSheet("color: #6B7280;")
+        self.lbl_data_hint.setObjectName("FormHint")
 
         self.cmb_origem = QComboBox()
         self.cmb_origem.setEditable(False)
@@ -71,7 +71,7 @@ class PaymentDialog(FormDialog):
 
         self.lbl_origem = QLabel("")
         self.lbl_origem.setWordWrap(True)
-        self.lbl_origem.setStyleSheet("color: #6B7280;")
+        self.lbl_origem.setObjectName("FormHint")
 
         self._picker_cat = CategoryPicker(self, allow_empty=False)
         self._picker_cat.connect_new_button(self._nova_categoria)
@@ -139,7 +139,7 @@ class PaymentDialog(FormDialog):
             c = cards_service.get(cid)
             if c:
                 self.lbl_origem.setText(
-                    f"Lançamento na fatura do cartão (competência pelo mês da data)."
+                    "Lançamento na fatura do cartão (competência pelo mês da data)."
                 )
             else:
                 self.lbl_origem.clear()
@@ -154,6 +154,7 @@ class PaymentDialog(FormDialog):
 
             categories_service.create(dlg.payload())
             self._picker_cat.reload_from_db()
+            emit_parent_view_data_changed(self)
 
     def _fill_origem(self) -> None:
         self.cmb_origem.clear()
@@ -209,8 +210,8 @@ class PaymentsView(CrudPage):
 
     def __init__(self) -> None:
         super().__init__(
-            "Pagamentos",
-            "Registre seus gastos avulsos e acompanhe o histórico.",
+            "Lançamentos",
+            "Gastos avulsos em conta ou cartão; o livro-caixa reflete débitos em conta quando aplicável.",
             ["Data", "Descrição", "Origem", "Categoria", "Forma", "Valor", "Observação"],
         )
         self._by_id: dict[int, Payment] = {}

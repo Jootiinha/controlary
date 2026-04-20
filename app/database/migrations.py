@@ -527,6 +527,32 @@ def _migrate_fixed_expense_months_valor_efetivo(conn) -> None:
     )
 
 
+def _migrate_income_months_valor_efetivo(conn) -> None:
+    cols = _table_columns(conn, "income_months")
+    if "valor_efetivo" in cols:
+        return
+    conn.execute("ALTER TABLE income_months ADD COLUMN valor_efetivo REAL")
+
+
+def _migrate_income_sources_drop_global_unique_nome(conn) -> None:
+    """Remove índice UNIQUE global em nome (permite avulsas homônimas); garante índice parcial."""
+    rows = conn.execute("PRAGMA index_list(income_sources)").fetchall()
+    for r in rows:
+        name = r["name"]
+        if not int(r["unique"]):
+            continue
+        partial = int(r["partial"]) if "partial" in r.keys() else 0
+        if partial:
+            continue
+        cols = conn.execute(f"PRAGMA index_info({name})").fetchall()
+        if len(cols) == 1 and cols[0]["name"] == "nome":
+            conn.execute(f'DROP INDEX IF EXISTS "{name}"')
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uniq_income_sources_nome_non_avulsa "
+        "ON income_sources(nome COLLATE NOCASE) WHERE tipo <> 'avulsa'"
+    )
+
+
 def _migrate_investments_tables(conn) -> None:
     conn.execute(
         """
@@ -589,7 +615,9 @@ def run_migrations() -> None:
         _migrate_income_sources_account_id(conn)
         _migrate_income_sources_avulsas_parceladas(conn)
         _migrate_income_sources_relax_nome_unique(conn)
+        _migrate_income_sources_drop_global_unique_nome(conn)
         _migrate_installments_account_id(conn)
         _migrate_month_tracking_tables(conn)
         _migrate_fixed_expense_months_valor_efetivo(conn)
+        _migrate_income_months_valor_efetivo(conn)
         _ensure_indexes_on_fk_columns(conn)

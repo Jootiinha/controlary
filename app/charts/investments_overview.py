@@ -46,7 +46,11 @@ def plot(ax) -> None:
         bbox_to_anchor=(1.02, 0.5),
         fontsize=8,
     )
-    ax.set_title("Investimentos ativos por tipo (valor aplicado)")
+    ax.set_title(
+        "Investimentos por tipo (valor aplicado)",
+        fontsize=9,
+        pad=8,
+    )
 
     def _hover_format(artist: Any, target: Any, index: int | None) -> str:
         if not isinstance(artist, Wedge):

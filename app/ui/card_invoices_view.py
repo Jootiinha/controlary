@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
@@ -102,7 +101,7 @@ class CardInvoiceEditorDialog(QDialog):
             self.sp_valor.setValue(sug)
 
         self.lbl_sug = QLabel(f"Total sugerido: {format_currency(sug)}")
-        self.lbl_sug.setStyleSheet("color: #6B7280;")
+        self.lbl_sug.setObjectName("FormHint")
 
         self.ed_obs = QPlainTextEdit()
         self.ed_obs.setFixedHeight(56)
@@ -144,6 +143,9 @@ class CardInvoiceEditorDialog(QDialog):
         self.accept()
 
     def _mark_paid(self) -> None:
+        md = _MarkPaidDialog(self)
+        if not md.exec():
+            return
         iid = card_invoices_service.upsert(
             self._cartao_id,
             self._ano_mes,
@@ -152,9 +154,6 @@ class CardInvoiceEditorDialog(QDialog):
             self.ed_obs.toPlainText().strip() or None,
         )
         self._inv_id = iid
-        md = _MarkPaidDialog(self)
-        if not md.exec():
-            return
         card_invoices_service.mark_paid(iid, md.conta_id(), md.pago_em())
         QMessageBox.information(self, "Fatura", "Fatura marcada como paga.")
         self.accept()

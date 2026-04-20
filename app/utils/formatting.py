@@ -17,23 +17,28 @@ def format_currency(value: float | int | None) -> str:
 
 
 def format_currency_short(value: float | int | None) -> str:
-    """Rótulos compactos para gráficos (ex.: R$ 1,2k, R$ 12k, R$ 1,2M)."""
+    """Rótulos compactos para gráficos (ex.: R$ 1,2k, R$ 12k, R$ 1,2M).
+
+    Negativos no mesmo padrão que ``format_currency`` (``R$ -…``), não ``-R$ …``.
+    """
     if value is None:
         return "R$ 0"
-    x = abs(float(value))
-    sign = "-" if float(value) < 0 else ""
+    v = float(value)
+    neg = v < 0
+    x = abs(v)
     if x >= 1_000_000:
         s = f"{x / 1_000_000:.1f}".replace(".", ",").rstrip("0").rstrip(",")
         if s == "":
             s = "0"
-        return f"{sign}R$ {s}M"
+        return f"R$ -{s}M" if neg else f"R$ {s}M"
     if x >= 1000:
         s = f"{x / 1000:.1f}".replace(".", ",").rstrip("0").rstrip(",")
         if s == "":
             s = "0"
-        return f"{sign}R$ {s}k"
+        return f"R$ -{s}k" if neg else f"R$ {s}k"
     n = int(round(x))
-    return f"{sign}R$ {n:,}".replace(",", ".")
+    thousands = f"{n:,}".replace(",", ".")
+    return f"R$ -{thousands}" if neg else f"R$ {thousands}"
 
 
 def parse_date(value: str) -> date:
@@ -66,10 +71,14 @@ def format_month_br(value: str | None) -> str:
 def try_parse_currency_br_display(text: str) -> float | None:
     """Interpreta texto no estilo ``format_currency`` (ex.: ``R$ 1.234,56``)."""
     s = (text or "").strip()
+    neg_prefix = False
+    if s.startswith("-R$"):
+        neg_prefix = True
+        s = "R$" + s[3:].lstrip()
     if not s.startswith("R$"):
         return None
     rest = s[2:].strip()
-    neg = False
+    neg = neg_prefix
     if rest.startswith("-"):
         neg = True
         rest = rest[1:].strip()

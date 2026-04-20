@@ -1,4 +1,4 @@
-"""Barras: renda mensal (recorrente + avulsa + parcelas do mês) vs gastos por mês."""
+"""Linhas: renda mensal (recorrente + avulsa + parcelas do mês) vs gastos por mês."""
 from __future__ import annotations
 
 from datetime import date
@@ -6,7 +6,7 @@ from datetime import date
 import numpy as np
 from matplotlib.ticker import FuncFormatter
 
-from app.charts.plot_labels import annotate_bars
+from app.charts.plot_labels import annotate_line_points
 from app.services import dashboard_service, expense_totals_service, income_sources_service
 from app.utils.formatting import format_currency_short
 
@@ -63,19 +63,42 @@ def plot(ax, months_past: int = 3, months_future: int = 9) -> None:
     )
 
     x = np.arange(len(labels))
-    w = 0.35
-    bars_r = ax.bar(
-        x - w / 2, r_vals, width=w, label="Renda (mês)", color="#22C55E"
+    ax.plot(
+        x,
+        r_vals,
+        marker="o",
+        markersize=5,
+        linewidth=2,
+        color="#22C55E",
+        label="Renda (mês)",
+        clip_on=False,
     )
-    bars_g = ax.bar(
-        x + w / 2,
+    ax.plot(
+        x,
         g_vals,
-        width=w,
-        label="Despesas (realizado / previsto mês)",
+        marker="s",
+        markersize=5,
+        linewidth=2,
         color="#EF4444",
+        label="Despesas (realizado / previsto mês)",
+        clip_on=False,
     )
-    annotate_bars(ax, bars_r, r_vals, fontsize=7, dy=3)
-    annotate_bars(ax, bars_g, g_vals, fontsize=7, dy=3)
+    annotate_line_points(
+        ax,
+        x,
+        r_vals,
+        fontsize=7,
+        dy=8,
+        format_value=format_currency_short,
+    )
+    annotate_line_points(
+        ax,
+        x,
+        g_vals,
+        fontsize=7,
+        dy=14,
+        format_value=format_currency_short,
+    )
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=8)
     if keys_past and keys_fut:
@@ -85,8 +108,8 @@ def plot(ax, months_past: int = 3, months_future: int = 9) -> None:
         FuncFormatter(lambda v, _: format_currency_short(v))
     )
     ax.set_title(
-        "Renda esperada (recorrente + avulsa) vs despesas\n"
-        f"Passado: renda e despesas realizadas · Futuro: renda esperada e despesas previstas "
-        f"(card «Gasto previsto no mês»)"
+        "Renda vs despesas (passado realizado · futuro previsto)",
+        fontsize=9,
+        pad=8,
     )
     ax.grid(True, axis="y", alpha=0.25)

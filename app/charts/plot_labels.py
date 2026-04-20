@@ -25,13 +25,17 @@ def annotate_bars(
         if skip_zero and val == 0:
             continue
         h = bar.get_height()
+        if h >= 0:
+            va_, dy_ = "bottom", dy
+        else:
+            va_, dy_ = "top", -dy
         ax.annotate(
             fmt(val),
             xy=(bar.get_x() + bar.get_width() / 2, h),
-            xytext=(0, dy),
+            xytext=(0, dy_),
             textcoords="offset points",
             ha="center",
-            va="bottom",
+            va=va_,
             fontsize=fontsize,
             clip_on=False,
         )
@@ -46,13 +50,15 @@ def annotate_line_points(
     dy: float = 8,
     skip_zero: bool = False,
     clip_on: bool = False,
+    format_value: Callable[[float], str] | None = None,
 ) -> None:
-    """Anota cada ponto (x, y) com o valor em R$."""
+    """Anota cada ponto (x, y) com o valor em R$ (ou ``format_value``)."""
+    fmt = format_value or format_currency
     for xi, yi in zip(x, y):
         if skip_zero and yi == 0:
             continue
         ax.annotate(
-            format_currency(yi),
+            fmt(yi),
             xy=(xi, yi),
             xytext=(0, dy),
             textcoords="offset points",

@@ -10,11 +10,14 @@ from PySide6.QtWidgets import (
     QDateEdit,
     QDoubleSpinBox,
     QFormLayout,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QPushButton,
     QSizePolicy,
     QSpinBox,
     QTabWidget,
@@ -24,12 +27,20 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.income_source import IncomeSource
-from app.services import accounts_service, income_months_service, income_sources_service
+from app.services import (
+    accounts_service,
+    calendar_service,
+    income_months_service,
+    income_sources_service,
+    kpi_service,
+)
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.crud_page import CrudPage
-from app.ui.widgets.readonly_table import ReadOnlyTable
 from app.ui.widgets.form_dialog import FormDialog
-from app.utils.formatting import current_month, format_currency
+from app.ui.widgets.readonly_table import ReadOnlyTable
+from app.utils.formatting import current_month, format_currency, format_date_br
+
+_OVERVIEW_KPI_MIN_W = 168
 
 FORMAS_RECEBIMENTO = [
     "Pix",
@@ -220,138 +231,108 @@ class IncomeSourceDialog(FormDialog):
         )
 
 
-class _IncomeCrud(CrudPage):
-    data_changed = Signal()
-
+class _IncomeOverviewTab(QWidget):
     def __init__(self) -> None:
-        super().__init__(
-            "Renda recorrente",
-            "Salário, aluguéis e outras rendas que se repetem todo mês.",
-            ["Nome", "Valor mensal", "Dia receb.", "Conta crédito", "Ativa", "Observação"],
+        super().__init__()
+        hint = QLabel(
+            "Indicadores do mês civil corrente. «Renda pendente» são fontes com "
+            "competência no mês ainda não marcadas como recebidas."
         )
-        self._by_id: dict[int, IncomeSource] = {}
-        self.totals_wrap.setVisible(True)
-        self._kp_mensal = KpiCard("Total mensal (ativas)", "-", compact=True)
-        self._kp_ativas = KpiCard("Fontes ativas", "-", compact=True)
-        self._kp_cad = KpiCard("Fontes cadastradas", "-", compact=True)
-        self.totals_bar.addWidget(self._kp_mensal)
-        self.totals_bar.addWidget(self._kp_ativas)
-        self.totals_bar.addWidget(self._kp_cad)
-        self.btn_add.clicked.connect(self._add)
-        self.btn_edit.clicked.connect(self._edit)
-        self.btn_delete.clicked.connect(self._delete)
-        self.btn_refresh.clicked.connect(self.reload)
-        self.reload()
+        hint.setWordWrap(True)
+        hint.setObjectName("FormHint")
 
-    def _refresh_kpi_cards(self) -> None:
-        ym = current_month()
-        total_ativas = sum(
-            s.valor_mensal
-            for s in self._by_id.values()
-            if s.ativo and income_sources_service.applies_to_month(s, ym)
+        self._kp_esp = KpiCard("Renda esperada", "-", compact=True)
+        self._kp_rec = KpiCard("Renda recebida (livro)", "-", compact=True)
+        self._kp_pend = KpiCard("Renda pendente", "-", compact=True)
+        self._kp_prev = KpiCard("Despesa prevista", "-", compact=True)
+
+        kpi_grid = QGridLayout()
+        kpi_grid.setContentsMargins(0, 0, 0, 0)
+        kpi_grid.setHorizontalSpacing(12)
+        kpi_grid.setVerticalSpacing(12)
+        for c in range(2):
+            kpi_grid.setColumnMinimumWidth(c, _OVERVIEW_KPI_MIN_W)
+            kpi_grid.setColumnStretch(c, 1)
+        align = Qt.AlignmentFlag.AlignTop
+        kpi_grid.addWidget(self._kp_esp, 0, 0, 1, 1, align)
+        kpi_grid.addWidget(self._kp_rec, 0, 1, 1, 1, align)
+        kpi_grid.addWidget(self._kp_pend, 1, 0, 1, 1, align)
+        kpi_grid.addWidget(self._kp_prev, 1, 1, 1, 1, align)
+
+        grp_kpi = QGroupBox("Indicadores do mês")
+        grp_kpi.setLayout(kpi_grid)
+
+        self.lbl_ent = QLabel(
+            f"Próximas entradas (próx. {calendar_service.UPCOMING_HORIZON_DAYS} dias)"
         )
-        n_ativas = sum(1 for s in self._by_id.values() if s.ativo)
-        self._kp_mensal.set_value(format_currency(total_ativas))
-        self._kp_ativas.set_value(str(n_ativas))
-        self._kp_cad.set_value(str(len(self._by_id)))
+        self.lbl_ent.setObjectName("PageSubtitle")
+        self.tbl_ent = ReadOnlyTable(
+            ["Data", "Descrição", "Valor"],
+            min_height=160,
+            size_policy=(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding,
+            ),
+        )
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 24, 24, 24)
+        lay.setSpacing(14)
+        lay.addWidget(hint)
+        lay.addWidget(grp_kpi)
+        lay.addWidget(self.lbl_ent)
+        lay.addWidget(self.tbl_ent, 1)
+
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
 
     def reload(self) -> None:
-        self._by_id.clear()
-        rows = []
-        for s in income_sources_service.list_all():
-            if s.tipo != "recorrente":
-                continue
-            if s.id is not None:
-                self._by_id[s.id] = s
-            obs = (s.observacao or "").replace("\n", " ")
-            if len(obs) > 80:
-                obs = obs[:77] + "..."
-            cn = s.conta_nome or "—"
-            rows.append((s.id or 0, [
-                s.nome,
-                format_currency(s.valor_mensal),
-                f"Dia {s.dia_recebimento:02d}",
-                cn,
-                "Sim" if s.ativo else "Não",
-                obs or "—",
-            ]))
-        self.model.set_rows(rows)
-        self._refresh_kpi_cards()
-        self.refresh_totals()
-
-    def compute_totals(self, visible_ids: list[int]) -> None:
         ym = current_month()
-        if not self._by_id:
-            self.set_footer_text("", "")
-            return
-        vis = [self._by_id[i] for i in visible_ids if i in self._by_id]
-        total = sum(
-            s.valor_mensal
-            for s in vis
-            if income_sources_service.applies_to_month(s, ym)
+        k = kpi_service.for_month(ym)
+        self._kp_esp.set_value(format_currency(k.renda_esperada))
+        self._kp_rec.set_value(format_currency(k.renda_recebida))
+        self._kp_pend.set_value(format_currency(k.renda_pendente))
+        self._kp_prev.set_value(format_currency(k.despesa_prevista))
+        evs = calendar_service.upcoming_receivables(
+            calendar_service.UPCOMING_HORIZON_DAYS
         )
-        self.set_footer_text(
-            f"Total no mês (visíveis): {format_currency(total)}",
-            f"Itens: {len(vis)}",
+        if not evs:
+            self.tbl_ent.set_rows(
+                [],
+                empty_row=["—", "Nada neste período", "—"],
+            )
+            return
+        self.tbl_ent.set_rows(
+            [
+                [
+                    format_date_br(ev.data),
+                    ev.titulo,
+                    format_currency(ev.valor),
+                ]
+                for ev in evs
+            ],
+            sort_keys=[
+                [ev.data, (ev.titulo or "").casefold(), float(ev.valor)] for ev in evs
+            ],
         )
 
-    def _add(self) -> None:
-        dlg = IncomeSourceDialog(self, allowed_tipos=("recorrente",))
-        if dlg.exec():
-            try:
-                income_sources_service.create(dlg.payload())
-            except ValueError as e:
-                QMessageBox.warning(self, "Validação", str(e))
-                return
-            self.reload()
-            self.data_changed.emit()
 
-    def _edit(self) -> None:
-        sid = self.selected_id()
-        if sid is None:
-            QMessageBox.information(self, "Editar", "Selecione uma fonte de renda.")
-            return
-        src = income_sources_service.get(sid)
-        if src is None:
-            return
-        dlg = IncomeSourceDialog(self, src, allowed_tipos=("recorrente",))
-        if dlg.exec():
-            try:
-                income_sources_service.update(dlg.payload())
-            except ValueError as e:
-                QMessageBox.warning(self, "Validação", str(e))
-                return
-            self.reload()
-            self.data_changed.emit()
-
-    def _delete(self) -> None:
-        sid = self.selected_id()
-        if sid is None:
-            QMessageBox.information(self, "Excluir", "Selecione uma fonte de renda.")
-            return
-        resp = QMessageBox.question(
-            self, "Excluir", "Excluir esta fonte de renda?"
-        )
-        if resp == QMessageBox.Yes:
-            income_sources_service.delete(sid)
-            self.reload()
-            self.data_changed.emit()
-
-
-class _IncomeAvulsasCrud(CrudPage):
+class _IncomeCadastroTab(CrudPage):
     data_changed = Signal()
 
     def __init__(self) -> None:
         super().__init__(
-            "Rendas avulsas",
-            "Serviços e outros recebimentos pontuais ou parcelados.",
+            "Fontes de renda",
+            "Recorrentes, avulsas e parceladas. Filtre por tipo ou use a busca.",
             [
                 "Nome",
                 "Tipo",
                 "Valor",
                 "Mês ref.",
                 "Parcelas",
-                "Total recebido",
+                "Recebido",
                 "A receber",
                 "Forma",
                 "Conta",
@@ -360,9 +341,23 @@ class _IncomeAvulsasCrud(CrudPage):
             ],
         )
         self._by_id: dict[int, IncomeSource] = {}
+        self._filt_tipo = QComboBox()
+        self._filt_tipo.addItem("Todos os tipos", None)
+        self._filt_tipo.addItem("Recorrente", "recorrente")
+        self._filt_tipo.addItem("Avulsa", "avulsa")
+        self._filt_tipo.addItem("Parcelada", "parcelada")
+        self._filt_tipo.currentIndexChanged.connect(lambda: self.reload())
+        bar = QHBoxLayout()
+        bar.addWidget(QLabel("Filtrar:"))
+        bar.addWidget(self._filt_tipo)
+        bar.addStretch()
+        wbar = QWidget()
+        wbar.setLayout(bar)
+        self.toolbar_layout.insertWidget(0, wbar)
+
         self.totals_wrap.setVisible(True)
         self._kp_mes = KpiCard("Total no mês atual", "-", compact=True)
-        self._kp_a_receber = KpiCard("Saldo a receber", "-", compact=True)
+        self._kp_a_receber = KpiCard("Saldo a receber (ativas)", "-", compact=True)
         self._kp_cad = KpiCard("Cadastradas", "-", compact=True)
         self.totals_bar.addWidget(self._kp_mes)
         self.totals_bar.addWidget(self._kp_a_receber)
@@ -374,12 +369,20 @@ class _IncomeAvulsasCrud(CrudPage):
         self.reload()
 
     def _tipo_label(self, s: IncomeSource) -> str:
-        return {"avulsa": "Avulsa", "parcelada": "Parcelada"}.get(s.tipo, s.tipo)
+        return {"avulsa": "Avulsa", "parcelada": "Parcelada", "recorrente": "Recorrente"}.get(
+            s.tipo, s.tipo
+        )
 
     def _parcelas_txt(self, s: IncomeSource) -> str:
         if s.tipo != "parcelada" or s.total_parcelas is None:
             return "—"
         return f"{s.parcelas_recebidas}/{s.total_parcelas}"
+
+    def _filt_ok(self, s: IncomeSource) -> bool:
+        ft = self._filt_tipo.currentData()
+        if ft is None:
+            return True
+        return s.tipo == ft
 
     def _refresh_kpi_cards(self) -> None:
         ym = current_month()
@@ -389,8 +392,9 @@ class _IncomeAvulsasCrud(CrudPage):
             if income_sources_service.applies_to_month(s, ym)
         )
         a_receber = sum(
-            income_sources_service.paid_remaining(s)[1]
+            income_sources_service.paid_remaining(s, include_inactive=False)[1]
             for s in self._by_id.values()
+            if s.ativo and s.tipo in ("avulsa", "parcelada")
         )
         self._kp_mes.set_value(format_currency(total))
         self._kp_a_receber.set_value(format_currency(a_receber))
@@ -400,7 +404,7 @@ class _IncomeAvulsasCrud(CrudPage):
         self._by_id.clear()
         rows = []
         for s in income_sources_service.list_all():
-            if s.tipo not in ("avulsa", "parcelada"):
+            if not self._filt_ok(s):
                 continue
             if s.id is not None:
                 self._by_id[s.id] = s
@@ -409,15 +413,23 @@ class _IncomeAvulsasCrud(CrudPage):
                 obs = obs[:57] + "..."
             cn = s.conta_nome or "—"
             forma = s.forma_recebimento or "—"
-            recebido, a_receber = income_sources_service.paid_remaining(s)
+            if s.tipo == "recorrente":
+                rec_txt = "—"
+                arr_txt = "—"
+            else:
+                recebido, a_receber = income_sources_service.paid_remaining(
+                    s, include_inactive=False
+                )
+                rec_txt = format_currency(recebido)
+                arr_txt = format_currency(a_receber)
             rows.append((s.id or 0, [
                 s.nome,
                 self._tipo_label(s),
                 format_currency(s.valor_mensal),
                 _format_ano_mes(s.mes_referencia),
                 self._parcelas_txt(s),
-                format_currency(recebido),
-                format_currency(a_receber),
+                rec_txt,
+                arr_txt,
                 forma,
                 cn,
                 "Sim" if s.ativo else "Não",
@@ -444,7 +456,7 @@ class _IncomeAvulsasCrud(CrudPage):
         )
 
     def _add(self) -> None:
-        dlg = IncomeSourceDialog(self, allowed_tipos=("avulsa", "parcelada"))
+        dlg = IncomeSourceDialog(self, allowed_tipos=("recorrente", "avulsa", "parcelada"))
         if dlg.exec():
             try:
                 income_sources_service.create(dlg.payload())
@@ -457,12 +469,12 @@ class _IncomeAvulsasCrud(CrudPage):
     def _edit(self) -> None:
         sid = self.selected_id()
         if sid is None:
-            QMessageBox.information(self, "Editar", "Selecione um item.")
+            QMessageBox.information(self, "Editar", "Selecione uma fonte de renda.")
             return
         src = income_sources_service.get(sid)
         if src is None:
             return
-        dlg = IncomeSourceDialog(self, src, allowed_tipos=("avulsa", "parcelada"))
+        dlg = IncomeSourceDialog(self, src, allowed_tipos=("recorrente", "avulsa", "parcelada"))
         if dlg.exec():
             try:
                 income_sources_service.update(dlg.payload())
@@ -475,7 +487,7 @@ class _IncomeAvulsasCrud(CrudPage):
     def _delete(self) -> None:
         sid = self.selected_id()
         if sid is None:
-            QMessageBox.information(self, "Excluir", "Selecione um item.")
+            QMessageBox.information(self, "Excluir", "Selecione uma fonte de renda.")
             return
         resp = QMessageBox.question(
             self, "Excluir", "Excluir esta fonte de renda?"
@@ -499,11 +511,11 @@ class _IncomeMonthlyControl(QWidget):
             QSizePolicy.Policy.Expanding,
         )
         hint = QLabel(
-            "Fontes com conta de crédito definida e competência no mês selecionado. "
-            "Marque como Recebido quando o valor entrar na conta."
+            "Fontes com competência no mês selecionado. Com conta de crédito, marque "
+            "Recebido para lançar no livro-caixa. Sem conta, defina no cadastro."
         )
         hint.setWordWrap(True)
-        hint.setObjectName("PageSubtitle")
+        hint.setObjectName("FormHint")
         row = QHBoxLayout()
         row.addWidget(QLabel("Competência:"))
         self.dt = QDateEdit()
@@ -550,22 +562,31 @@ class _IncomeMonthlyControl(QWidget):
 
     def reload_table(self) -> None:
         ym = self.ano_mes()
-        items = [
-            s
-            for s in income_sources_service.list_all()
-            if s.account_id is not None
-            and s.id is not None
-            and income_sources_service.applies_to_month(s, ym)
-        ]
+        with_account: list[IncomeSource] = []
+        without_account: list[IncomeSource] = []
+        for s in income_sources_service.list_all():
+            if s.id is None:
+                continue
+            if not income_sources_service.applies_to_month(s, ym):
+                continue
+            if s.account_id is not None:
+                with_account.append(s)
+            else:
+                without_account.append(s)
+        items = with_account + without_account
         if self._hdr_sort_col is not None:
             col = self._hdr_sort_col
             rev = self._hdr_sort_order == Qt.SortOrder.DescendingOrder
 
             def hdr_key(s: IncomeSource):
                 assert s.id is not None
-                acc = accounts_service.get(int(s.account_id))
+                acc = accounts_service.get(int(s.account_id)) if s.account_id else None
                 cn = (acc.nome if acc else "—").lower()
-                rec = income_months_service.is_received(s.id, ym)
+                rec = (
+                    income_months_service.is_received(s.id, ym)
+                    if s.account_id
+                    else False
+                )
                 if col == 0:
                     return (s.nome.lower(),)
                 if col == 1:
@@ -588,30 +609,35 @@ class _IncomeMonthlyControl(QWidget):
             it_v = QTableWidgetItem(format_currency(s.valor_mensal))
             it_v.setTextAlignment(ReadOnlyTable.ALIGN_RIGHT)
             self.tbl.setItem(i, 1, it_v)
-            acc = accounts_service.get(int(s.account_id))
-            it_c = QTableWidgetItem(acc.nome if acc else "—")
+            acc = accounts_service.get(int(s.account_id)) if s.account_id else None
+            it_c = QTableWidgetItem(acc.nome if acc else "— (defina no cadastro)")
             it_c.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
             self.tbl.setItem(i, 2, it_c)
-            cb = QComboBox()
-            cb.addItems(["Pendente", "Recebido"])
-            rec = income_months_service.is_received(sid, ym)
-            cb.blockSignals(True)
-            cb.setCurrentIndex(1 if rec else 0)
-            cb.blockSignals(False)
-            cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            if s.account_id is None:
+                btn = QPushButton("Definir conta…")
+                btn.clicked.connect(lambda _=False, sid=sid: self._edit_source_account(sid))
+                self.tbl.setCellWidget(i, 3, btn)
+            else:
+                cb = QComboBox()
+                cb.addItems(["Pendente", "Recebido"])
+                rec = income_months_service.is_received(sid, ym)
+                cb.blockSignals(True)
+                cb.setCurrentIndex(1 if rec else 0)
+                cb.blockSignals(False)
+                cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-            def make_handler(src_id: int, combo: QComboBox, competencia: str):
-                def on_change(_idx: int) -> None:
-                    want = combo.currentIndex() == 1
-                    income_months_service.set_month_status(
-                        src_id, competencia, recebido=want
-                    )
-                    self.data_changed.emit()
+                def make_handler(src_id: int, combo: QComboBox, competencia: str):
+                    def on_change(_idx: int) -> None:
+                        want = combo.currentIndex() == 1
+                        income_months_service.set_month_status(
+                            src_id, competencia, recebido=want
+                        )
+                        self.data_changed.emit()
 
-                return on_change
+                    return on_change
 
-            cb.currentIndexChanged.connect(make_handler(sid, cb, ym))
-            self.tbl.setCellWidget(i, 3, cb)
+                cb.currentIndexChanged.connect(make_handler(sid, cb, ym))
+                self.tbl.setCellWidget(i, 3, cb)
 
         hdr = self.tbl.horizontalHeader()
         if self._hdr_sort_col is not None:
@@ -620,27 +646,83 @@ class _IncomeMonthlyControl(QWidget):
         else:
             hdr.setSortIndicatorShown(False)
 
+    def _edit_source_account(self, src_id: int) -> None:
+        src = income_sources_service.get(src_id)
+        if src is None:
+            return
+        dlg = IncomeSourceDialog(self, src, allowed_tipos=("recorrente", "avulsa", "parcelada"))
+        if dlg.exec():
+            try:
+                income_sources_service.update(dlg.payload())
+            except ValueError as e:
+                QMessageBox.warning(self, "Validação", str(e))
+                return
+            self.reload_table()
+            self.data_changed.emit()
+
+
+class _IncomeHistoryTab(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        hint = QLabel(
+            "Créditos registrados no livro-caixa com origem «renda» (últimos lançamentos)."
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("FormHint")
+        self.tbl = ReadOnlyTable(
+            ["Data", "Valor", "Conta", "Descrição"],
+            min_height=200,
+            size_policy=(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding,
+            ),
+        )
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(hint)
+        lay.addWidget(self.tbl, 1)
+
+    def reload(self) -> None:
+        rows = income_sources_service.list_renda_ledger_rows(400)
+        if not rows:
+            self.tbl.set_rows([], empty_message="Nenhum crédito de renda no livro-caixa.")
+            return
+        self.tbl.set_rows(
+            [
+                [
+                    format_date_br(d),
+                    format_currency(v),
+                    conta,
+                    desc or "—",
+                ]
+                for d, v, desc, conta in rows
+            ],
+            sort_keys=[[d, float(v), conta.casefold(), desc.casefold()] for d, v, desc, conta in rows],
+        )
+
 
 class IncomeSourcesView(QWidget):
     data_changed = Signal()
 
     def __init__(self) -> None:
         super().__init__()
-        self._crud = _IncomeCrud()
-        self._avulsas = _IncomeAvulsasCrud()
+        self._overview = _IncomeOverviewTab()
+        self._cadastro = _IncomeCadastroTab()
         self._month = _IncomeMonthlyControl()
-        self._crud.data_changed.connect(self.data_changed.emit)
-        self._avulsas.data_changed.connect(self.data_changed.emit)
+        self._hist = _IncomeHistoryTab()
+        self._cadastro.data_changed.connect(self.data_changed.emit)
         self._month.data_changed.connect(self.data_changed.emit)
         tabs = QTabWidget()
-        tabs.addTab(self._crud, "Recorrentes")
-        tabs.addTab(self._avulsas, "Avulsas e parceladas")
+        tabs.addTab(self._overview, "Visão geral")
+        tabs.addTab(self._cadastro, "Cadastros")
         tabs.addTab(self._month, "Situação mensal")
+        tabs.addTab(self._hist, "Histórico")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(tabs, 1)
 
     def reload(self) -> None:
-        self._crud.reload()
-        self._avulsas.reload()
+        self._overview.reload()
+        self._cadastro.reload()
         self._month.reload_table()
+        self._hist.reload()

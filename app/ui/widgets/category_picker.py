@@ -6,7 +6,6 @@ from typing import Optional
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QPushButton, QWidget
 
-from app.models.category import Category
 from app.services import categories_service
 
 
@@ -67,3 +66,15 @@ class CategoryPicker(QWidget):
 
     def connect_new_button(self, slot) -> None:
         self._btn_new.clicked.connect(slot)
+
+
+def emit_parent_view_data_changed(widget: QWidget) -> None:
+    """Propaga criação de categoria a partir de um FormDialog aninhado até uma view com ``data_changed``."""
+    w: QWidget | None = widget.parent()
+    while w is not None:
+        sig = getattr(w, "data_changed", None)
+        emit = getattr(sig, "emit", None) if sig is not None else None
+        if callable(emit):
+            emit()
+            return
+        w = w.parent()

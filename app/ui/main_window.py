@@ -21,6 +21,7 @@ from app.ui.accounts_cards_view import AccountsCardsView
 from app.ui.calendar_view import CalendarView
 from app.ui.card_invoices_view import CardInvoicesView
 from app.ui.categories_view import CategoriesView
+from app.ui.charts_view import ChartsView
 from app.ui.dashboard_view import DashboardView
 from app.ui.fixed_expenses_view import FixedExpensesView
 from app.ui.history_view import HistoryView
@@ -49,6 +50,7 @@ class MainWindow(QMainWindow):
         self.card_invoices = CardInvoicesView()
         self.calendar_page = CalendarView()
         self.history = HistoryView()
+        self.charts_view = ChartsView()
         self.investments = InvestmentsView()
 
         self.stack = QStackedWidget()
@@ -63,6 +65,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.card_invoices)
         self.stack.addWidget(self.calendar_page)
         self.stack.addWidget(self.history)
+        self.stack.addWidget(self.charts_view)
         self.stack.addWidget(self.investments)
 
         self.sidebar = self._build_sidebar()
@@ -104,7 +107,7 @@ class MainWindow(QMainWindow):
                 "Movimento",
                 [
                     (
-                        "Pagamentos",
+                        "Lançamentos",
                         4,
                         QStyle.StandardPixmap.SP_DialogApplyButton,
                     ),
@@ -134,13 +137,18 @@ class MainWindow(QMainWindow):
                 "Análise",
                 [
                     (
-                        "Histórico e análises",
+                        "Histórico",
                         10,
                         QStyle.StandardPixmap.SP_FileDialogContentsView,
                     ),
                     (
-                        "Investimentos",
+                        "Gráficos e análises",
                         11,
+                        QStyle.StandardPixmap.SP_FileDialogDetailedView,
+                    ),
+                    (
+                        "Investimentos",
+                        12,
                         QStyle.StandardPixmap.SP_ArrowUp,
                     ),
                 ],
@@ -260,6 +268,7 @@ class MainWindow(QMainWindow):
         def refresh_all():
             self.dashboard.reload()
             self.history.reload()
+            self.charts_view.reload()
             self.calendar_page.reload()
             self.investments.reload()
 
