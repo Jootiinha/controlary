@@ -271,3 +271,5 @@ cp ~/.controle-financeiro/app.db ~/Desktop/app-backup-$(date +%Y%m%d).db
 ## Licença
 
 Uso pessoal — adapte como quiser.
+
+#
