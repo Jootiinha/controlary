@@ -179,6 +179,7 @@ CREATE TABLE IF NOT EXISTS income_months (
     status           TEXT    NOT NULL DEFAULT 'pendente',
     recebido_em      TEXT,
     valor_efetivo    REAL,
+    conta_recebimento_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
     PRIMARY KEY (income_source_id, ano_mes),
     CHECK (status IN ('pendente', 'recebido'))
 );

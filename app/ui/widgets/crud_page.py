@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.ui.widgets.readonly_table import apply_default_header_resize_modes
 from app.ui.widgets.wrapping_header import WrappingHeaderView
 from app.utils.formatting import compare_sort_display_values
 
@@ -164,7 +164,10 @@ class CrudPage(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        hdr = self.table.horizontalHeader()
+        apply_default_header_resize_modes(hdr, len(headers))
+        if len(headers) >= 2:
+            hdr.setStretchLastSection(True)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.doubleClicked.connect(lambda _: self.btn_edit.click())
         self.table.setMinimumHeight(120)

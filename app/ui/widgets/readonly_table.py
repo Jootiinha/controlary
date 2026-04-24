@@ -15,6 +15,21 @@ from PySide6.QtWidgets import (
 from app.ui.widgets.wrapping_header import WrappingHeaderView
 
 
+def apply_default_header_resize_modes(
+    header: QHeaderView,
+    ncols: int,
+    *,
+    uniform_stretch: bool = False,
+    stretch_mode: QHeaderView.ResizeMode = QHeaderView.ResizeMode.Stretch,
+) -> None:
+    if uniform_stretch or ncols <= 1:
+        header.setSectionResizeMode(stretch_mode)
+        return
+    for i in range(ncols - 1):
+        header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+    header.setSectionResizeMode(ncols - 1, QHeaderView.ResizeMode.Stretch)
+
+
 class SortableTableWidgetItem(QTableWidgetItem):
     """Item que ordena por ``UserRole`` quando ambos têm chave; senão por texto."""
 
@@ -49,6 +64,7 @@ class ReadOnlyTable(QTableWidget):
         fixed_height: int | None = None,
         min_height: int | None = None,
         stretch_mode: QHeaderView.ResizeMode = QHeaderView.ResizeMode.Stretch,
+        uniform_stretch: bool = False,
         section_resize_modes: list[QHeaderView.ResizeMode] | None = None,
         alternating_row_colors: bool = True,
         show_grid: bool = False,
@@ -81,16 +97,25 @@ class ReadOnlyTable(QTableWidget):
         th = self.horizontalHeader()
         if header_default_alignment is not None:
             th.setDefaultAlignment(header_default_alignment)
-        if stretch_last_section is not None:
-            th.setStretchLastSection(stretch_last_section)
 
+        ncols = len(headers)
         if section_resize_modes is not None:
-            if len(section_resize_modes) != len(headers):
+            if len(section_resize_modes) != ncols:
                 raise ValueError("section_resize_modes deve ter o mesmo tamanho que headers")
             for i, mode in enumerate(section_resize_modes):
                 th.setSectionResizeMode(i, mode)
         else:
-            th.setSectionResizeMode(stretch_mode)
+            apply_default_header_resize_modes(
+                th,
+                ncols,
+                uniform_stretch=uniform_stretch,
+                stretch_mode=stretch_mode,
+            )
+
+        if stretch_last_section is not None:
+            th.setStretchLastSection(stretch_last_section)
+        elif section_resize_modes is None and not uniform_stretch and ncols >= 2:
+            th.setStretchLastSection(True)
 
         if vertical_header_default_section_size is not None:
             self.verticalHeader().setDefaultSectionSize(vertical_header_default_section_size)

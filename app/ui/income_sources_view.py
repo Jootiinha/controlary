@@ -231,12 +231,57 @@ class IncomeSourceDialog(FormDialog):
         )
 
 
+class IncomeMonthReceiptDialog(FormDialog):
+    """Valor e conta do crédito no livro-caixa para uma competência."""
+
+    def __init__(
+        self,
+        parent: Optional[QWidget],
+        nome_fonte: str,
+        default_valor: float,
+        default_account_id: Optional[int],
+    ) -> None:
+        super().__init__(f"Recebimento — {nome_fonte}", parent)
+        self.ed_valor = QDoubleSpinBox()
+        self.ed_valor.setRange(0.01, 10_000_000.0)
+        self.ed_valor.setDecimals(2)
+        self.ed_valor.setPrefix("R$ ")
+        self.ed_valor.setSingleStep(100.0)
+        self.ed_valor.setValue(float(default_valor))
+
+        self.cmb_conta = QComboBox()
+        self.cmb_conta.setEditable(False)
+        for a in accounts_service.list_all():
+            self.cmb_conta.addItem(a.nome, a.id)
+        if default_account_id is not None:
+            for i in range(self.cmb_conta.count()):
+                if self.cmb_conta.itemData(i) == default_account_id:
+                    self.cmb_conta.setCurrentIndex(i)
+                    break
+
+        self.form.addRow("Valor creditado *", self.ed_valor)
+        self.form.addRow("Conta de recebimento *", self.cmb_conta)
+
+    def validate(self) -> tuple[bool, str | None]:
+        if self.ed_valor.value() <= 0:
+            return False, "Valor deve ser maior que zero"
+        if self.cmb_conta.count() == 0:
+            return False, "Cadastre uma conta em Contas e cartões"
+        if self.cmb_conta.currentData() is None:
+            return False, "Selecione a conta de recebimento"
+        return True, None
+
+    def receipt_payload(self) -> tuple[float, int]:
+        return float(self.ed_valor.value()), int(self.cmb_conta.currentData())
+
+
 class _IncomeOverviewTab(QWidget):
     def __init__(self) -> None:
         super().__init__()
         hint = QLabel(
-            "Indicadores do mês civil corrente. «Renda pendente» são fontes com "
-            "competência no mês ainda não marcadas como recebidas."
+            "Estes números são sempre do mês civil corrente (hoje), independentemente da "
+            "competência escolhida na aba Recebimentos. «Renda pendente»: fontes com "
+            "competência neste mês ainda não marcadas como recebidas."
         )
         hint.setWordWrap(True)
         hint.setObjectName("FormHint")
@@ -259,7 +304,7 @@ class _IncomeOverviewTab(QWidget):
         kpi_grid.addWidget(self._kp_pend, 1, 0, 1, 1, align)
         kpi_grid.addWidget(self._kp_prev, 1, 1, 1, 1, align)
 
-        grp_kpi = QGroupBox("Indicadores do mês")
+        grp_kpi = QGroupBox("Indicadores — mês atual")
         grp_kpi.setLayout(kpi_grid)
 
         self.lbl_ent = QLabel(
@@ -325,7 +370,10 @@ class _IncomeCadastroTab(CrudPage):
     def __init__(self) -> None:
         super().__init__(
             "Fontes de renda",
-            "Recorrentes, avulsas e parceladas. Filtre por tipo ou use a busca.",
+            "Recorrentes, avulsas e parceladas. Filtre por tipo ou use a busca. "
+            "O registo de dinheiro já recebido no livro-caixa faz-se na aba Recebimentos. "
+            "Avulsas e parceladas totalmente recebidas não aparecem aqui (continuam na base "
+            "de dados; use Recebimentos ou Livro-caixa para histórico).",
             [
                 "Nome",
                 "Tipo",
@@ -405,6 +453,8 @@ class _IncomeCadastroTab(CrudPage):
         rows = []
         for s in income_sources_service.list_all():
             if not self._filt_ok(s):
+                continue
+            if income_sources_service.is_fully_received(s):
                 continue
             if s.id is not None:
                 self._by_id[s.id] = s
@@ -511,8 +561,8 @@ class _IncomeMonthlyControl(QWidget):
             QSizePolicy.Policy.Expanding,
         )
         hint = QLabel(
-            "Fontes com competência no mês selecionado. Com conta de crédito, marque "
-            "Recebido para lançar no livro-caixa. Sem conta, defina no cadastro."
+            "Competência é o mês a que a renda se refere (YYYY-MM). Ao marcar Recebido, "
+            "indique valor e conta do crédito no livro-caixa (podem diferir do cadastro)."
         )
         hint.setWordWrap(True)
         hint.setObjectName("FormHint")
@@ -538,10 +588,17 @@ class _IncomeMonthlyControl(QWidget):
         self.tbl.horizontalHeader().sectionClicked.connect(
             self._on_monthly_header_clicked
         )
+        inner = QVBoxLayout()
+        inner.setSpacing(10)
+        inner.addLayout(row)
+        inner.addWidget(self.tbl, 1)
+        grp = QGroupBox("Competência e situação")
+        grp.setLayout(inner)
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 24, 24, 24)
+        lay.setSpacing(14)
         lay.addWidget(hint)
-        lay.addLayout(row)
-        lay.addWidget(self.tbl, 1)
+        lay.addWidget(grp, 1)
         self.reload_table()
 
     def _on_monthly_header_clicked(self, logical_index: int) -> None:
@@ -560,33 +617,105 @@ class _IncomeMonthlyControl(QWidget):
         d = self.dt.date()
         return f"{d.year():04d}-{d.month():02d}"
 
+    def _default_valor_mes(self, s: IncomeSource, ym: str) -> float:
+        row = income_months_service.get_month_record(s.id, ym)
+        if row and row[1] is not None:
+            return float(row[1])
+        return float(s.valor_mensal)
+
+    def _default_conta_mes(self, s: IncomeSource, ym: str) -> Optional[int]:
+        row = income_months_service.get_month_record(s.id, ym)
+        if row and row[2] is not None:
+            return int(row[2])
+        return s.account_id
+
+    def _resolved_conta_nome(self, s: IncomeSource, ym: str) -> str:
+        row = income_months_service.get_month_record(s.id, ym)
+        cr = row[2] if row else None
+        aid = income_months_service.resolved_account_id(s.account_id, cr)
+        if aid is None:
+            return "—"
+        acc = accounts_service.get(int(aid))
+        return acc.nome if acc else "—"
+
+    def _dialog_recebimento(self, s: IncomeSource, ym: str) -> bool:
+        assert s.id is not None
+        dlg = IncomeMonthReceiptDialog(
+            self,
+            s.nome,
+            self._default_valor_mes(s, ym),
+            self._default_conta_mes(s, ym),
+        )
+        if not dlg.exec():
+            return False
+        val, acc = dlg.receipt_payload()
+        cid_spec: Optional[int] = None
+        if s.account_id is None or acc != s.account_id:
+            cid_spec = acc
+        income_months_service.set_month_status(
+            s.id,
+            ym,
+            recebido=True,
+            valor_efetivo=val,
+            conta_recebimento_id=cid_spec,
+        )
+        return True
+
+    def _make_situacao_widget(self, s: IncomeSource, ym: str) -> QWidget:
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(2, 0, 2, 0)
+        lay.setSpacing(6)
+        cb = QComboBox()
+        cb.addItems(["Pendente", "Recebido"])
+        rec = income_months_service.is_received(s.id, ym)
+        cb.blockSignals(True)
+        cb.setCurrentIndex(1 if rec else 0)
+        cb.blockSignals(False)
+        cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        btn = QPushButton("Ajustar…")
+        btn.setEnabled(rec)
+
+        def on_adjust() -> None:
+            if self._dialog_recebimento(s, ym):
+                self.reload_table()
+                self.data_changed.emit()
+
+        def on_change(_idx: int) -> None:
+            want = cb.currentIndex() == 1
+            if want:
+                if not self._dialog_recebimento(s, ym):
+                    cb.blockSignals(True)
+                    cb.setCurrentIndex(0)
+                    cb.blockSignals(False)
+            else:
+                income_months_service.set_month_status(s.id, ym, recebido=False)
+            self.reload_table()
+            self.data_changed.emit()
+
+        btn.clicked.connect(on_adjust)
+        cb.currentIndexChanged.connect(on_change)
+        lay.addWidget(cb, 1)
+        lay.addWidget(btn, 0)
+        return w
+
     def reload_table(self) -> None:
         ym = self.ano_mes()
-        with_account: list[IncomeSource] = []
-        without_account: list[IncomeSource] = []
+        items: list[IncomeSource] = []
         for s in income_sources_service.list_all():
             if s.id is None:
                 continue
             if not income_sources_service.applies_to_month(s, ym):
                 continue
-            if s.account_id is not None:
-                with_account.append(s)
-            else:
-                without_account.append(s)
-        items = with_account + without_account
+            items.append(s)
         if self._hdr_sort_col is not None:
             col = self._hdr_sort_col
             rev = self._hdr_sort_order == Qt.SortOrder.DescendingOrder
 
             def hdr_key(s: IncomeSource):
                 assert s.id is not None
-                acc = accounts_service.get(int(s.account_id)) if s.account_id else None
-                cn = (acc.nome if acc else "—").lower()
-                rec = (
-                    income_months_service.is_received(s.id, ym)
-                    if s.account_id
-                    else False
-                )
+                cn = self._resolved_conta_nome(s, ym).lower()
+                rec = income_months_service.is_received(s.id, ym)
                 if col == 0:
                     return (s.nome.lower(),)
                 if col == 1:
@@ -602,42 +731,16 @@ class _IncomeMonthlyControl(QWidget):
         self.tbl.setRowCount(len(items))
         for i, s in enumerate(items):
             assert s.id is not None
-            sid = s.id
             it_n = QTableWidgetItem(s.nome)
             it_n.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
             self.tbl.setItem(i, 0, it_n)
             it_v = QTableWidgetItem(format_currency(s.valor_mensal))
             it_v.setTextAlignment(ReadOnlyTable.ALIGN_RIGHT)
             self.tbl.setItem(i, 1, it_v)
-            acc = accounts_service.get(int(s.account_id)) if s.account_id else None
-            it_c = QTableWidgetItem(acc.nome if acc else "— (defina no cadastro)")
+            it_c = QTableWidgetItem(self._resolved_conta_nome(s, ym))
             it_c.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
             self.tbl.setItem(i, 2, it_c)
-            if s.account_id is None:
-                btn = QPushButton("Definir conta…")
-                btn.clicked.connect(lambda _=False, sid=sid: self._edit_source_account(sid))
-                self.tbl.setCellWidget(i, 3, btn)
-            else:
-                cb = QComboBox()
-                cb.addItems(["Pendente", "Recebido"])
-                rec = income_months_service.is_received(sid, ym)
-                cb.blockSignals(True)
-                cb.setCurrentIndex(1 if rec else 0)
-                cb.blockSignals(False)
-                cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-                def make_handler(src_id: int, combo: QComboBox, competencia: str):
-                    def on_change(_idx: int) -> None:
-                        want = combo.currentIndex() == 1
-                        income_months_service.set_month_status(
-                            src_id, competencia, recebido=want
-                        )
-                        self.data_changed.emit()
-
-                    return on_change
-
-                cb.currentIndexChanged.connect(make_handler(sid, cb, ym))
-                self.tbl.setCellWidget(i, 3, cb)
+            self.tbl.setCellWidget(i, 3, self._make_situacao_widget(s, ym))
 
         hdr = self.tbl.horizontalHeader()
         if self._hdr_sort_col is not None:
@@ -646,26 +749,13 @@ class _IncomeMonthlyControl(QWidget):
         else:
             hdr.setSortIndicatorShown(False)
 
-    def _edit_source_account(self, src_id: int) -> None:
-        src = income_sources_service.get(src_id)
-        if src is None:
-            return
-        dlg = IncomeSourceDialog(self, src, allowed_tipos=("recorrente", "avulsa", "parcelada"))
-        if dlg.exec():
-            try:
-                income_sources_service.update(dlg.payload())
-            except ValueError as e:
-                QMessageBox.warning(self, "Validação", str(e))
-                return
-            self.reload_table()
-            self.data_changed.emit()
-
 
 class _IncomeHistoryTab(QWidget):
     def __init__(self) -> None:
         super().__init__()
         hint = QLabel(
-            "Créditos registrados no livro-caixa com origem «renda» (últimos lançamentos)."
+            "Créditos já lançados nas contas com origem «renda» no livro-caixa "
+            "(últimos lançamentos)."
         )
         hint.setWordWrap(True)
         hint.setObjectName("FormHint")
@@ -678,7 +768,8 @@ class _IncomeHistoryTab(QWidget):
             ),
         )
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setContentsMargins(24, 24, 24, 24)
+        lay.setSpacing(14)
         lay.addWidget(hint)
         lay.addWidget(self.tbl, 1)
 
@@ -713,10 +804,26 @@ class IncomeSourcesView(QWidget):
         self._cadastro.data_changed.connect(self.data_changed.emit)
         self._month.data_changed.connect(self.data_changed.emit)
         tabs = QTabWidget()
-        tabs.addTab(self._overview, "Visão geral")
-        tabs.addTab(self._cadastro, "Cadastros")
-        tabs.addTab(self._month, "Situação mensal")
-        tabs.addTab(self._hist, "Histórico")
+        tabs.addTab(self._month, "Recebimentos")
+        tabs.addTab(self._cadastro, "Fontes")
+        tabs.addTab(self._overview, "Resumo (mês atual)")
+        tabs.addTab(self._hist, "Livro-caixa")
+        tabs.setTabToolTip(
+            0,
+            "Marque renda como recebida por competência (qualquer mês) e lance no livro-caixa.",
+        )
+        tabs.setTabToolTip(
+            1,
+            "Cadastro de fontes: salário, avulsas e parceladas; conta padrão e valores esperados.",
+        )
+        tabs.setTabToolTip(
+            2,
+            "Indicadores e próximas entradas apenas do mês civil corrente (calendário).",
+        )
+        tabs.setTabToolTip(
+            3,
+            "Lista de créditos de renda já registados nas contas (histórico do livro-caixa).",
+        )
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(tabs, 1)

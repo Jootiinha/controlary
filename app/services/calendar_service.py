@@ -250,6 +250,10 @@ def upcoming_receivables(horizon_days: int = UPCOMING_HORIZON_DAYS) -> list[Cale
                 continue
             if ev.pago:
                 continue
+            if ev.ref_id is not None and income_months_service.is_received(
+                ev.ref_id, f"{ev.data.year:04d}-{ev.data.month:02d}"
+            ):
+                continue
             out.append(ev)
     out.sort(
         key=lambda e: (e.data, _TIPO_ORDEM[e.tipo], e.titulo.casefold())
@@ -271,7 +275,7 @@ def upcoming_payables(horizon_days: int = UPCOMING_HORIZON_DAYS) -> list[Calenda
     for y, m in _months_from_until(today, end):
         for ev in events_for_month(y, m):
             if ev.tipo == "pagamento":
-                if ev.data < today or ev.data > end:
+                if ev.data <= today or ev.data > end:
                     continue
                 out.append(ev)
                 continue

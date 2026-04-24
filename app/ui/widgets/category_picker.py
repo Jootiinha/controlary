@@ -27,7 +27,10 @@ class CategoryPicker(QWidget):
         lay.addWidget(self._combo, 1)
         lay.addWidget(self._btn_new)
         self._reload_options()
-        self._combo.currentIndexChanged.connect(self.category_changed.emit)
+        self._combo.currentIndexChanged.connect(self._on_combo_index_changed)
+
+    def _on_combo_index_changed(self, _index: int) -> None:
+        self.category_changed.emit()
 
     def _reload_options(self) -> None:
         self._combo.blockSignals(True)

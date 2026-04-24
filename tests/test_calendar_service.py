@@ -31,3 +31,18 @@ def test_upcoming_payables_inclui_pagamento_avulso_futuro_em_conta(
     assert len(tipos_pag) == 1
     assert tipos_pag[0].titulo.startswith("Prestador")
     assert tipos_pag[0].valor == 100.0
+
+    hoje_iso = hoje.isoformat()
+    with transaction() as conn:
+        conn.execute(
+            """
+            INSERT INTO payments (
+                valor, descricao, data, conta, conta_id, cartao_id, forma_pagamento
+            ) VALUES (50.0, 'Já pago hoje', ?, 'Conta X', 1, NULL, 'Pix')
+            """,
+            (hoje_iso,),
+        )
+    evs2 = calendar_service.upcoming_payables(calendar_service.UPCOMING_HORIZON_DAYS)
+    assert not any(
+        e.tipo == "pagamento" and "Já pago hoje" in e.titulo for e in evs2
+    )

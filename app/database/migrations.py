@@ -534,6 +534,16 @@ def _migrate_income_months_valor_efetivo(conn) -> None:
     conn.execute("ALTER TABLE income_months ADD COLUMN valor_efetivo REAL")
 
 
+def _migrate_income_months_conta_recebimento(conn) -> None:
+    cols = _table_columns(conn, "income_months")
+    if "conta_recebimento_id" in cols:
+        return
+    conn.execute(
+        "ALTER TABLE income_months ADD COLUMN conta_recebimento_id "
+        "INTEGER REFERENCES accounts(id) ON DELETE SET NULL"
+    )
+
+
 def _migrate_income_sources_drop_global_unique_nome(conn) -> None:
     """Remove índice UNIQUE global em nome (permite avulsas homônimas); garante índice parcial."""
     rows = conn.execute("PRAGMA index_list(income_sources)").fetchall()
@@ -620,4 +630,5 @@ def run_migrations() -> None:
         _migrate_month_tracking_tables(conn)
         _migrate_fixed_expense_months_valor_efetivo(conn)
         _migrate_income_months_valor_efetivo(conn)
+        _migrate_income_months_conta_recebimento(conn)
         _ensure_indexes_on_fk_columns(conn)

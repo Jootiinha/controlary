@@ -124,6 +124,16 @@ def paid_remaining(
     return round(received_sum, 2), round(remaining, 2)
 
 
+def is_fully_received(src: IncomeSource) -> bool:
+    """Avulsa ou parcelada com o total esperado já creditado em income_months."""
+    if src.tipo not in ("avulsa", "parcelada"):
+        return False
+    if not src.competencias():
+        return False
+    _, rem = paid_remaining(src, include_inactive=True)
+    return rem <= 0.0
+
+
 def sum_received_for_month(ano_mes: str) -> float:
     """Créditos de renda no livro-caixa no mês (origem = renda)."""
     with transaction() as conn:
