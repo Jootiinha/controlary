@@ -15,6 +15,7 @@ make install     # poetry install --no-root
 make run         # roda o app (poetry run python main.py)
 make check       # valida pyproject e compila todos os .py
 make test        # roda pytest (grupo dev: pytest, pytest-qt)
+make test-cov    # pytest com cobertura em app/services (requer pytest-cov no grupo dev)
 make reset-db    # apaga ~/.controle-financeiro/app.db
 make build-mac   # empacota .app
 make build-win   # empacota .exe
@@ -112,7 +113,7 @@ def _migrate_cards_dia_pagamento_fatura(conn) -> None:
 
 ## Fora de escopo por padrão
 
-- Expandir a suíte de testes além do fluxo da dashboard sem pedido explícito.
+- Duplicar cenários já cobertos só para inflar cobertura sem pedido explícito.
 - Mudar stack (Qt → Tkinter/Electron; SQLite → Postgres).
 - Introduzir rede externa; o app é intencionalmente offline.
 - Alterar a licença ou o conteúdo de `LICENSE`.
@@ -126,5 +127,5 @@ def _migrate_cards_dia_pagamento_fatura(conn) -> None:
 - Investimentos: `app/services/investments_service.py`
 - Situação mensal (renda, parcelas, assinaturas): `app/services/income_months_service.py`, `app/services/installment_months_service.py`, `app/services/subscription_months_service.py`
 - Widgets reutilizáveis: `app/ui/widgets/`
-- Testes automatizados: `tests/` (`make test`)
+- Testes automatizados: `tests/` (`make test`). Ao alterar `app/services/`, atualize ou acrescente testes em `tests/test_*_service.py` quando mudar regras, validações ou livro-caixa. Cobertura opcional: `poetry add --group dev pytest-cov && poetry lock`, depois `make test-cov` (relatório em `app/services`).
 - Ponto de entrada: `main.py`

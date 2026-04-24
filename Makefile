@@ -1,4 +1,4 @@
-.PHONY: help install install-all run icon build-mac build-win clean reset-db check test
+.PHONY: help install install-all run icon build-mac build-win clean reset-db check test test-cov
 
 ifeq ($(OS),Windows_NT)
   PYTHON ?= py -3
@@ -22,6 +22,7 @@ help:
 	@echo "  make build-win   Empacota o app para Windows (.exe em dist/)"
 	@echo "  make check       Valida pyproject.toml e compila os .py"
 	@echo "  make test        Roda a suíte pytest (instala deps com dev se necessário)"
+	@echo "  make test-cov    Pytest com cobertura em app/services (requer pytest-cov; ver AGENTS.md)"
 	@echo "  make reset-db    Apaga o banco em ~/.controle-financeiro/app.db"
 	@echo "  make clean       Remove build/, dist/, caches e .pyc"
 	@echo ""
@@ -67,6 +68,11 @@ check:
 test: $(VENV_STAMP)
 	$(POETRY) install --with dev --no-root
 	$(POETRY) run pytest tests/
+
+test-cov: $(VENV_STAMP)
+	$(POETRY) install --with dev --no-root
+	@$(POETRY) run python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('pytest_cov') else (print('Instale pytest-cov: poetry add --group dev pytest-cov && poetry lock', file=sys.stderr) or 1))"
+	$(POETRY) run pytest tests/ --cov=app/services --cov-report=term-missing --cov-fail-under=0
 
 reset-db:
 	$(POETRY) run python build/reset_db.py
