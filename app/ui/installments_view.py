@@ -311,10 +311,16 @@ class _InstallmentsCrud(CrudPage):
         if iid is None:
             QMessageBox.information(self, "Excluir", "Selecione um parcelamento.")
             return
-        resp = QMessageBox.question(
-            self, "Excluir",
-            "Excluir este parcelamento? O histórico será perdido."
+        inst = installments_service.get(iid)
+        msg = (
+            "Esta compra já tem parcelas contabilizadas como pagas; ao excluir, perde-se "
+            "esse rastreio no cartão/conta e competências em Situação mensal.\n\n"
+            "Deseja continuar?"
+            if inst is not None and int(inst.parcelas_pagas or 0) > 0
+            else "Excluir este parcelamento? O histórico em Situação mensal e "
+            "lançamentos no livro-caixa ligados a ele serão removidos."
         )
+        resp = QMessageBox.question(self, "Excluir", msg)
         if resp == QMessageBox.Yes:
             installments_service.delete(iid)
             self.reload()
@@ -390,8 +396,8 @@ class _InstallmentMonthlyControl(QWidget):
 
             def hdr_key(inst: Installment):
                 assert inst.id is not None
-                acc = accounts_service.get(int(inst.account_id))
-                cn = (acc.nome if acc else "—").lower()
+                acc = accounts_service.get_or_unknown(int(inst.account_id))
+                cn = acc.nome.lower()
                 pg = installment_months_service.is_paid(inst.id, ym)
                 if col == 0:
                     return (inst.nome_fatura.lower(),)
@@ -417,8 +423,8 @@ class _InstallmentMonthlyControl(QWidget):
             it_v = QTableWidgetItem(format_currency(inst.valor_parcela))
             it_v.setTextAlignment(ReadOnlyTable.ALIGN_RIGHT)
             self.tbl.setItem(i, 1, it_v)
-            acc = accounts_service.get(int(inst.account_id))
-            it_c = QTableWidgetItem(acc.nome if acc else "—")
+            acc = accounts_service.get_or_unknown(int(inst.account_id))
+            it_c = QTableWidgetItem(acc.nome)
             it_c.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
             self.tbl.setItem(i, 2, it_c)
             it_m = QTableWidgetItem(format_month_br(inst.mes_referencia))
@@ -455,14 +461,12 @@ class _InstallmentMonthlyControl(QWidget):
 
 
 class InstallmentsView(QWidget):
-    data_changed = Signal()
-
     def __init__(self) -> None:
         super().__init__()
         self._crud = _InstallmentsCrud()
         self._month = _InstallmentMonthlyControl()
-        self._crud.data_changed.connect(self.data_changed.emit)
-        self._month.data_changed.connect(self.data_changed.emit)
+        self._crud.data_changed.connect(self._month.reload_table)
+        self._month.data_changed.connect(self._crud.reload)
         tabs = QTabWidget()
         tabs.addTab(self._crud, "Cadastro")
         tabs.addTab(self._month, "Situação mensal (conta)")

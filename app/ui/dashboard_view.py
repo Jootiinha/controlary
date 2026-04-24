@@ -295,7 +295,7 @@ class DashboardView(QWidget):
         self.card_renda.set_value(format_currency(data.renda_mensal_total))
         self.card_gasto_previsto_mes.set_value(format_currency(data.previsto_mes))
         self.card_gasto_previsto_mes.set_subtitle(
-            f"Já lançado em Lançamentos: {format_currency(data.total_gasto_mes)}"
+            f"Saídas no livro-caixa no mês: {format_currency(data.total_gasto_mes)}"
         )
         self.card_gasto_previsto_mes.setToolTip(
             "Previsto estruturado-first: faturas de cartão em aberto (valor ou sugerido), "

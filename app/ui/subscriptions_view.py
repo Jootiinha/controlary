@@ -313,7 +313,10 @@ class _SubscriptionsCrud(CrudPage):
             QMessageBox.information(self, "Excluir", "Selecione uma assinatura.")
             return
         resp = QMessageBox.question(
-            self, "Excluir", "Excluir esta assinatura?"
+            self,
+            "Excluir",
+            "Excluir esta assinatura remove o cadastro, o histórico em Situação mensal "
+            "e os débitos no livro-caixa gerados por ela.",
         )
         if resp == QMessageBox.Yes:
             subscriptions_service.delete(sid)
@@ -447,14 +450,12 @@ class _SubscriptionMonthlyControl(QWidget):
 class SubscriptionsView(QWidget):
     """Cadastro + situação mensal (conta)."""
 
-    data_changed = Signal()
-
     def __init__(self) -> None:
         super().__init__()
         self._crud = _SubscriptionsCrud()
         self._month = _SubscriptionMonthlyControl()
-        self._crud.data_changed.connect(self.data_changed.emit)
-        self._month.data_changed.connect(self.data_changed.emit)
+        self._crud.data_changed.connect(self._month.reload_table)
+        self._month.data_changed.connect(self._crud.reload)
         tabs = QTabWidget()
         tabs.addTab(self._crud, "Cadastro")
         tabs.addTab(self._month, "Situação mensal")

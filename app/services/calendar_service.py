@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Literal
 
+from app.models.income_source import installment_month_applies
 from app.services import (
     card_invoices_service,
     cards_service,
@@ -19,12 +20,13 @@ from app.services import (
     subscriptions_service,
 )
 from app.utils.formatting import parse_date
+from app.utils.mes_ano import MesAno
 
 CalendarEventType = Literal[
     "pagamento", "renda", "assinatura", "fixo", "parcela", "fatura"
 ]
 
-PARCELA_FALLBACK_DIA = 1
+PARCELA_FALLBACK_DIA = 15
 
 UPCOMING_HORIZON_DAYS = 7
 
@@ -75,7 +77,11 @@ def _cards_with_activity_in_month(ano_mes: str, ano: int, mes: int) -> set[int]:
     for inst in installments_service.list_all():
         if inst.status != "ativo" or inst.parcelas_restantes <= 0:
             continue
-        if inst.mes_referencia != ano_mes or inst.cartao_id is None:
+        if inst.cartao_id is None:
+            continue
+        if not installment_month_applies(
+            inst.mes_referencia, inst.total_parcelas, ano_mes
+        ):
             continue
         out.add(inst.cartao_id)
     for s in subscriptions_service.list_all():
@@ -93,7 +99,7 @@ def events_for_month(ano: int, mes: int) -> list[CalendarEvent]:
         raise ValueError("Mês inválido")
     primeiro = date(ano, mes, 1)
     ultimo = date(ano, mes, _ultimo_dia_mes(ano, mes))
-    ano_mes = f"{ano:04d}-{mes:02d}"
+    ano_mes = str(MesAno(ano, mes))
 
     out: list[CalendarEvent] = []
 
@@ -182,13 +188,15 @@ def events_for_month(ano: int, mes: int) -> list[CalendarEvent]:
     for inst in installments_service.list_all():
         if inst.status != "ativo" or inst.parcelas_restantes <= 0:
             continue
-        if inst.mes_referencia != ano_mes:
+        if not installment_month_applies(
+            inst.mes_referencia, inst.total_parcelas, ano_mes
+        ):
             continue
         if inst.cartao_id is not None:
             continue
         if inst.id is None:
             continue
-        d = date(ano, mes, PARCELA_FALLBACK_DIA)
+        d = _data_com_dia(ano, mes, PARCELA_FALLBACK_DIA)
         titulo = f"{inst.nome_fatura} — parcela"
         pago = installment_months_service.is_paid(inst.id, ano_mes)
         out.append(

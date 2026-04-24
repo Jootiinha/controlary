@@ -2,45 +2,94 @@
 from __future__ import annotations
 
 import sqlite3
-from calendar import monthrange
 from datetime import date
 from typing import List, Optional, Tuple
 
-from app.database.connection import transaction
+from app.database.connection import use
+from app.events import app_events
 from app.models.fixed_expense import FixedExpense
+from app.repositories import fixed_expenses_repo
 from app.services import accounts_service
+from app.services._monthly_ledger import MonthlyLedgerService
+from app.services.competencia_ledger import data_iso_no_mes
+from app.utils.mes_ano import MesAno
 
 
-def _status_row(conn, fe_id: int, ano_mes: str) -> Optional[str]:
-    row = conn.execute(
-        """
-        SELECT status FROM fixed_expense_months
-         WHERE fixed_expense_id = ? AND ano_mes = ?
-        """,
-        (fe_id, ano_mes),
-    ).fetchone()
-    return row["status"] if row else None
-
-
-def is_paid(fe_id: int, ano_mes: str) -> bool:
+def is_paid(fe_id: int, ano_mes: str, conn: Optional[sqlite3.Connection] = None) -> bool:
     """Sem registro = ainda não pago (previsto)."""
-    with transaction() as conn:
-        st = _status_row(conn, fe_id, ano_mes)
+    with use(conn) as c:
+        st = fixed_expenses_repo.status_row(c, fe_id, ano_mes)
     return st == "pago"
 
 
-def get_valor_efetivo(fe_id: int, ano_mes: str) -> Optional[float]:
-    with transaction() as conn:
-        row = conn.execute(
-            """
-            SELECT valor_efetivo FROM fixed_expense_months
-             WHERE fixed_expense_id = ? AND ano_mes = ?
-            """,
-            (fe_id, ano_mes),
-        ).fetchone()
-    if not row or row["valor_efetivo"] is None:
-        return None
-    return float(row["valor_efetivo"])
+def get_valor_efetivo(
+    fe_id: int, ano_mes: str, conn: Optional[sqlite3.Connection] = None
+) -> Optional[float]:
+    with use(conn) as c:
+        return fixed_expenses_repo.fetch_valor_efetivo_month(c, fe_id, ano_mes)
+
+
+class _FixedExpenseMonthLedger(MonthlyLedgerService):
+    def set_status(
+        self,
+        entity_id: int,
+        ano_mes: MesAno,
+        marcado: bool,
+        *,
+        conn: Optional[sqlite3.Connection] = None,
+        **kwargs: object,
+    ) -> None:
+        fe_id = entity_id
+        pago = marcado
+        ym = str(ano_mes)
+        valor_efetivo: Optional[float] = kwargs.get("valor_efetivo")  # type: ignore[assignment]
+        conta_debito_id: Optional[int] = kwargs.get("conta_debito_id")  # type: ignore[assignment]
+        status = "pago" if pago else "pendente"
+        with use(conn) as c:
+            fe = fixed_expenses_repo.fetch_fixed_for_month_apply(c, fe_id)
+            key = accounts_service.transaction_key_fixed(fe_id, ym)
+            valor_debito = (
+                float(valor_efetivo)
+                if valor_efetivo is not None
+                else (float(fe["valor_mensal"]) if fe else 0.0)
+            )
+            valor_gravado: Optional[float] = None
+            if pago and fe:
+                valor_gravado = (
+                    float(valor_efetivo)
+                    if valor_efetivo is not None
+                    else float(fe["valor_mensal"])
+                )
+            effective_conta: Optional[int] = None
+            if fe:
+                if fe["conta_id"]:
+                    effective_conta = int(fe["conta_id"])
+                elif conta_debito_id is not None:
+                    effective_conta = int(conta_debito_id)
+            if not pago:
+                accounts_service.remove_transaction_key(key, conn=c)
+            elif effective_conta is None:
+                raise ValueError(
+                    "Marque como pago somente com conta para débito no livro-caixa "
+                    "(cadastre conta no fixo ou escolha conta no diálogo)."
+                )
+            else:
+                dia = int(fe["dia_referencia"] or 5) if fe else 5
+                data = data_iso_no_mes(ym, dia)
+                accounts_service.upsert_transaction(
+                    effective_conta,
+                    -valor_debito,
+                    data,
+                    "fixo",
+                    key,
+                    None,
+                    conn=c,
+                )
+            fixed_expenses_repo.upsert_month_row(c, fe_id, ym, status, valor_gravado)
+        app_events().fixed_changed.emit()
+
+
+_FIX = _FixedExpenseMonthLedger()
 
 
 def set_month_status(
@@ -51,189 +100,83 @@ def set_month_status(
     conta_debito_id: Optional[int] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> None:
-    status = "pago" if pago else "pendente"
-
-    def _apply(c: sqlite3.Connection) -> None:
-        fe = c.execute(
-            """
-            SELECT valor_mensal, conta_id, dia_referencia
-              FROM fixed_expenses
-             WHERE id = ?
-            """,
-            (fe_id,),
-        ).fetchone()
-        key = accounts_service.transaction_key_fixed(fe_id, ano_mes)
-        valor_debito = (
-            float(valor_efetivo)
-            if valor_efetivo is not None
-            else (float(fe["valor_mensal"]) if fe else 0.0)
-        )
-        valor_gravado: Optional[float] = valor_efetivo if pago else None
-        effective_conta: Optional[int] = None
-        if fe:
-            if fe["conta_id"]:
-                effective_conta = int(fe["conta_id"])
-            elif conta_debito_id is not None:
-                effective_conta = int(conta_debito_id)
-        if not pago:
-            accounts_service.remove_transaction_key(key, conn=c)
-        elif effective_conta is not None:
-            y, m = map(int, ano_mes.split("-"))
-            dia = min(int(fe["dia_referencia"] or 5), monthrange(y, m)[1])
-            data = f"{y:04d}-{m:02d}-{dia:02d}"
-            accounts_service.upsert_transaction(
-                effective_conta,
-                -valor_debito,
-                data,
-                "fixo",
-                key,
-                None,
-                conn=c,
-            )
-        row = c.execute(
-            """
-            SELECT 1 FROM fixed_expense_months
-             WHERE fixed_expense_id = ? AND ano_mes = ?
-            """,
-            (fe_id, ano_mes),
-        ).fetchone()
-        if row:
-            c.execute(
-                """
-                UPDATE fixed_expense_months SET status = ?, valor_efetivo = ?
-                 WHERE fixed_expense_id = ? AND ano_mes = ?
-                """,
-                (status, valor_gravado, fe_id, ano_mes),
-            )
-        else:
-            c.execute(
-                """
-                INSERT INTO fixed_expense_months (fixed_expense_id, ano_mes, status, valor_efetivo)
-                VALUES (?, ?, ?, ?)
-                """,
-                (fe_id, ano_mes, status, valor_gravado),
-            )
-
-    if conn is not None:
-        _apply(conn)
-    else:
-        with transaction() as c:
-            _apply(c)
+    _FIX.set_status(
+        fe_id,
+        MesAno.from_str(ano_mes),
+        pago,
+        conn=conn,
+        valor_efetivo=valor_efetivo,
+        conta_debito_id=conta_debito_id,
+    )
 
 
-def list_active() -> List[FixedExpense]:
-    with transaction() as conn:
-        rows = conn.execute(
-            """
-            SELECT f.*, a.nome AS conta_nome, cat.nome AS categoria_nome
-              FROM fixed_expenses f
-              LEFT JOIN accounts a ON a.id = f.conta_id
-              LEFT JOIN categories cat ON cat.id = f.category_id
-             WHERE f.ativo = 1
-             ORDER BY f.nome COLLATE NOCASE
-            """
-        ).fetchall()
+def list_active(conn: Optional[sqlite3.Connection] = None) -> List[FixedExpense]:
+    with use(conn) as c:
+        rows = fixed_expenses_repo.list_active(c)
     return [FixedExpense.from_row(r) for r in rows]
 
 
-def list_all() -> List[FixedExpense]:
-    with transaction() as conn:
-        rows = conn.execute(
-            """
-            SELECT f.*, a.nome AS conta_nome, cat.nome AS categoria_nome
-              FROM fixed_expenses f
-              LEFT JOIN accounts a ON a.id = f.conta_id
-              LEFT JOIN categories cat ON cat.id = f.category_id
-             ORDER BY f.ativo DESC, f.nome COLLATE NOCASE
-            """
-        ).fetchall()
+def list_all(conn: Optional[sqlite3.Connection] = None) -> List[FixedExpense]:
+    with use(conn) as c:
+        rows = fixed_expenses_repo.list_all(c)
     return [FixedExpense.from_row(r) for r in rows]
 
 
-def get(fe_id: int) -> Optional[FixedExpense]:
-    with transaction() as conn:
-        row = conn.execute(
-            """
-            SELECT f.*, a.nome AS conta_nome, cat.nome AS categoria_nome
-              FROM fixed_expenses f
-              LEFT JOIN accounts a ON a.id = f.conta_id
-              LEFT JOIN categories cat ON cat.id = f.category_id
-             WHERE f.id = ?
-            """,
-            (fe_id,),
-        ).fetchone()
+def get(fe_id: int, conn: Optional[sqlite3.Connection] = None) -> Optional[FixedExpense]:
+    with use(conn) as c:
+        row = fixed_expenses_repo.get(c, fe_id)
     return FixedExpense.from_row(row) if row else None
 
 
-def create(fe: FixedExpense) -> int:
-    with transaction() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO fixed_expenses (
-                nome, valor_mensal, dia_referencia, forma_pagamento,
-                conta_id, observacao, ativo, category_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                fe.nome.strip(),
-                fe.valor_mensal,
-                fe.dia_referencia,
-                fe.forma_pagamento,
-                fe.conta_id,
-                fe.observacao,
-                1 if fe.ativo else 0,
-                fe.category_id,
-            ),
+def create(fe: FixedExpense, conn: Optional[sqlite3.Connection] = None) -> int:
+    with use(conn) as c:
+        pid = fixed_expenses_repo.insert(
+            c,
+            nome=fe.nome.strip(),
+            valor_mensal=fe.valor_mensal,
+            dia_referencia=fe.dia_referencia,
+            forma_pagamento=fe.forma_pagamento,
+            conta_id=fe.conta_id,
+            observacao=fe.observacao,
+            ativo=1 if fe.ativo else 0,
+            category_id=fe.category_id,
         )
-        return int(cur.lastrowid)
+    app_events().fixed_changed.emit()
+    return pid
 
 
-def update(fe: FixedExpense) -> None:
+def update(fe: FixedExpense, conn: Optional[sqlite3.Connection] = None) -> None:
     if fe.id is None:
         raise ValueError("Gasto fixo sem id")
-    with transaction() as conn:
-        conn.execute(
-            """
-            UPDATE fixed_expenses
-               SET nome = ?, valor_mensal = ?, dia_referencia = ?, forma_pagamento = ?,
-                   conta_id = ?, observacao = ?, ativo = ?, category_id = ?
-             WHERE id = ?
-            """,
-            (
-                fe.nome.strip(),
-                fe.valor_mensal,
-                fe.dia_referencia,
-                fe.forma_pagamento,
-                fe.conta_id,
-                fe.observacao,
-                1 if fe.ativo else 0,
-                fe.category_id,
-                fe.id,
-            ),
+    with use(conn) as c:
+        fixed_expenses_repo.update(
+            c,
+            fe_id=int(fe.id),
+            nome=fe.nome.strip(),
+            valor_mensal=fe.valor_mensal,
+            dia_referencia=fe.dia_referencia,
+            forma_pagamento=fe.forma_pagamento,
+            conta_id=fe.conta_id,
+            observacao=fe.observacao,
+            ativo=1 if fe.ativo else 0,
+            category_id=fe.category_id,
         )
+    app_events().fixed_changed.emit()
 
 
-def delete(fe_id: int) -> None:
-    with transaction() as conn:
+def delete(fe_id: int, conn: Optional[sqlite3.Connection] = None) -> None:
+    with use(conn) as c:
         accounts_service.remove_transaction_keys_like_prefix(
-            f"fixed:{fe_id}:", conn=conn
+            f"fixed:{fe_id}:", conn=c
         )
-        conn.execute("DELETE FROM fixed_expenses WHERE id = ?", (fe_id,))
+        fixed_expenses_repo.delete(c, fe_id)
+    app_events().fixed_changed.emit()
 
 
-def sum_unpaid_for_month(ano_mes: str) -> float:
+def sum_unpaid_for_month(ano_mes: str, conn: Optional[sqlite3.Connection] = None) -> float:
     """Soma valores de itens ativos cuja competência não está como paga."""
-    with transaction() as conn:
-        rows = conn.execute(
-            """
-            SELECT f.valor_mensal, m.status
-              FROM fixed_expenses f
-              LEFT JOIN fixed_expense_months m
-                ON m.fixed_expense_id = f.id AND m.ano_mes = ?
-             WHERE f.ativo = 1
-            """,
-            (ano_mes,),
-        ).fetchall()
+    with use(conn) as c:
+        rows = fixed_expenses_repo.sum_unpaid_for_month(c, ano_mes)
     total = 0.0
     for r in rows:
         if r["status"] != "pago":
@@ -241,20 +184,11 @@ def sum_unpaid_for_month(ano_mes: str) -> float:
     return round(total, 2)
 
 
-def sum_paid_for_month(ano_mes: str) -> float:
+def sum_paid_for_month(ano_mes: str, conn: Optional[sqlite3.Connection] = None) -> float:
     """Soma valores pagos no mês (valor_efetivo quando informado, senão valor_mensal)."""
-    with transaction() as conn:
-        row = conn.execute(
-            """
-            SELECT COALESCE(SUM(COALESCE(m.valor_efetivo, f.valor_mensal)), 0) AS t
-              FROM fixed_expenses f
-              JOIN fixed_expense_months m
-                ON m.fixed_expense_id = f.id AND m.ano_mes = ?
-             WHERE f.ativo = 1 AND m.status = 'pago'
-            """,
-            (ano_mes,),
-        ).fetchone()
-    return round(float(row["t"] or 0), 2)
+    with use(conn) as c:
+        row = fixed_expenses_repo.sum_paid_for_month_row(c, ano_mes)
+    return round(float(row["t"] or 0), 2) if row else 0.0
 
 
 def sum_unpaid_rest_of_calendar_year() -> float:
@@ -279,9 +213,6 @@ def projection_by_month_rest_of_year() -> List[Tuple[str, float]]:
     return out
 
 
-def count_active() -> int:
-    with transaction() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM fixed_expenses WHERE ativo = 1"
-        ).fetchone()
-    return int(row["n"] or 0)
+def count_active(conn: Optional[sqlite3.Connection] = None) -> int:
+    with use(conn) as c:
+        return fixed_expenses_repo.count_active(c)

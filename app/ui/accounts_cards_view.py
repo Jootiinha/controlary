@@ -284,7 +284,15 @@ class _AccountsCrud(CrudPage):
         if aid is None:
             QMessageBox.information(self, "Excluir", "Selecione uma conta.")
             return
-        if QMessageBox.question(self, "Excluir", "Excluir esta conta?") != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Excluir",
+                "Excluir esta conta remove também o histórico de movimentações "
+                "(livro-caixa) e vínculos que dependam dela.",
+            )
+            != QMessageBox.Yes
+        ):
             return
         try:
             accounts_service.delete(aid)
@@ -350,7 +358,15 @@ class _CardsCrud(CrudPage):
         if cid is None:
             QMessageBox.information(self, "Excluir", "Selecione um cartão.")
             return
-        if QMessageBox.question(self, "Excluir", "Excluir este cartão?") != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Excluir",
+                "Excluir este cartão remove faturas, parcelamentos e referências "
+                "associadas a ele.",
+            )
+            != QMessageBox.Yes
+        ):
             return
         try:
             cards_service.delete(cid)
@@ -364,14 +380,12 @@ class _CardsCrud(CrudPage):
 class AccountsCardsView(QWidget):
     """Aba com cadastro de contas e de cartões."""
 
-    data_changed = Signal()
-
     def __init__(self) -> None:
         super().__init__()
         self._acc = _AccountsCrud()
         self._card = _CardsCrud()
-        self._acc.data_changed.connect(self.data_changed.emit)
-        self._card.data_changed.connect(self.data_changed.emit)
+        self._acc.data_changed.connect(self._card.reload)
+        self._card.data_changed.connect(self._acc.reload)
 
         tabs = QTabWidget()
         tabs.addTab(self._acc, "Contas")

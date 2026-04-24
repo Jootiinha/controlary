@@ -259,7 +259,16 @@ class _FixedCrud(CrudPage):
         if fid is None:
             QMessageBox.information(self, "Excluir", "Selecione um item.")
             return
-        if QMessageBox.question(self, "Excluir", "Excluir este gasto fixo?") != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Excluir",
+                "Excluir este gasto fixo? Pagamentos espelhados e marcações em "
+                "Situação mensal deixam de existir; o livro-caixa pode ter sido "
+                "ajustado ao marcar o fixo como pago.",
+            )
+            != QMessageBox.Yes
+        ):
             return
         fixed_expenses_service.delete(fid)
         self.reload()
@@ -554,16 +563,28 @@ class _MonthlyControl(QWidget):
                             combo.blockSignals(False)
                             return
                         mp = dlg.mirror_payment()
+                        try:
+                            fixed_expenses_service.set_month_status(
+                                f_id,
+                                competencia,
+                                pago=True,
+                                valor_efetivo=dlg.valor_efetivo(),
+                                conta_debito_id=dlg.conta_debito_para_livro(),
+                            )
+                        except ValueError as err:
+                            QMessageBox.warning(self, "Validação", str(err))
+                            combo.blockSignals(True)
+                            combo.setCurrentIndex(0)
+                            combo.blockSignals(False)
+                            return
                         if mp is not None:
                             payments_service.create(mp, record_ledger=False)
-                        fixed_expenses_service.set_month_status(
-                            f_id,
-                            competencia,
-                            pago=True,
-                            valor_efetivo=dlg.valor_efetivo(),
-                            conta_debito_id=dlg.conta_debito_para_livro(),
-                        )
                     else:
+                        fe_local = fixed_expenses_service.get(f_id)
+                        if fe_local is not None:
+                            payments_service.delete_mirrors_for_fixed_month(
+                                fe_local.nome, competencia
+                            )
                         fixed_expenses_service.set_month_status(
                             f_id, competencia, pago=want_pago
                         )
@@ -605,6 +626,9 @@ class _MonthlyControl(QWidget):
         else:
             hdr.setSortIndicatorShown(False)
 
+    def reload_table(self) -> None:
+        self._reload_table()
+
     def _reload_projection(self) -> None:
         data = fixed_expenses_service.projection_by_month_rest_of_year()
         self.tbl_proj.set_rows(
@@ -618,14 +642,12 @@ class _MonthlyControl(QWidget):
 
 
 class FixedExpensesView(QWidget):
-    data_changed = Signal()
-
     def __init__(self) -> None:
         super().__init__()
         self._crud = _FixedCrud()
         self._month = _MonthlyControl()
-        self._crud.data_changed.connect(self.data_changed.emit)
-        self._month.data_changed.connect(self.data_changed.emit)
+        self._crud.data_changed.connect(self._month.reload_table)
+        self._month.data_changed.connect(self._crud.reload)
 
         tabs = QTabWidget()
         tabs.addTab(self._crud, "Cadastro")

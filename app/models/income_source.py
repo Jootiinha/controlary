@@ -25,6 +25,13 @@ def competencias_parcelada(mes_inicio: str, total: int) -> list[str]:
     return out
 
 
+def installment_month_applies(mes_referencia: str, total_parcelas: int, ano_mes: str) -> bool:
+    """True se ``ano_mes`` é uma competência do cronograma (parcelamento em N meses)."""
+    if total_parcelas <= 0:
+        return False
+    return ano_mes in competencias_parcelada(mes_referencia, total_parcelas)
+
+
 @dataclass
 class IncomeSource:
     id: Optional[int]

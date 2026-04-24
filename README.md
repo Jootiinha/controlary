@@ -19,6 +19,7 @@ Roda 100% offline, com persistência local e interface nativa moderna.
 - **Faturas de cartão**: competência por cartão, valor total, status e pagamento com conta
 - **Investimentos**: aplicações por conta, snapshots de valor ao longo do tempo e visão consolidada
 - **Calendário**: visão mensal com marcação dos dias que têm eventos (pagamentos, rendas, assinaturas, fixos e parcelas)
+- **Tema claro ou escuro** (menu **Exibir**; preferência em `QSettings`)
 - **Histórico e análises** com tabela de transações + gráficos embedados (matplotlib):
   - **Renda vs despesa**
   - **Fluxo acumulado**
@@ -46,7 +47,7 @@ Roda 100% offline, com persistência local e interface nativa moderna.
 ```
 controlary/
 ├── app/
-│   ├── ui/              # QMainWindow, views e widgets reutilizáveis
+│   ├── ui/              # QMainWindow, views, theme.py, style.qss / style_dark.qss
 │   │   ├── widgets/     # card, chart_canvas, crud_page, form_dialog,
 │   │   │                # category_picker, readonly_table, payment_confirmation_dialog, wrapping_header
 │   │   ├── main_window.py
@@ -67,11 +68,13 @@ controlary/
 │   │                    # Subscription, FixedExpense, IncomeSource,
 │   │                    # CardInvoice, Investment, …
 │   ├── database/        # connection.py, schema.sql, migrations.py
-│   ├── services/        # regras de negócio e queries agregadas
+│   ├── repositories/    # SQL por domínio (sem transação própria)
+│   ├── services/        # regras, orquestração, transações; chamam repositories
+│   ├── events.py        # AppEvents (sinais p/ sincronizar UI após mudanças)
 │   ├── charts/          # funções plot(ax, …) matplotlib (renda_vs_despesa,
 │   │                    # category_month_views, …)
 │   ├── importers/       # reservado para importadores (ex.: banks/)
-│   └── utils/           # formatação, resolução de paths
+│   └── utils/           # formatação, mes_ano (YYYY-MM), paths
 ├── tests/               # pytest (dashboard, views, serviços)
 ├── assets/              # icon.png, icon.ico, icon.icns
 ├── build/
@@ -101,6 +104,7 @@ O `Makefile` na raiz concentra os comandos do dia a dia. Rode `make help` para v
 | `make install-all`  | Instala runtime + grupo `build` (inclui PyInstaller)                |
 | `make run`          | Roda o app localmente (`poetry run python main.py`)                 |
 | `make test`         | Roda a suíte pytest (`poetry install --with dev` se necessário)     |
+| `make test-cov`     | Pytest com cobertura em `app/services` (exige `pytest-cov` no grupo dev) |
 | `make icon`         | Gera os ícones placeholder em `assets/` (`.png`, `.ico`, `.icns`)   |
 | `make build-mac`    | Empacota o app para macOS (`dist/ControleFinanceiro.app`)           |
 | `make build-win`    | Empacota o app para Windows (`dist\ControleFinanceiro.exe`)         |
@@ -262,7 +266,6 @@ cp ~/.controle-financeiro/app.db ~/Desktop/app-backup-$(date +%Y%m%d).db
 - **Exportar** relatórios em CSV/PDF
 - **Múltiplas moedas** com conversão automática
 - **Backup automático** (rotação diária em `~/.controle-financeiro/backups/`)
-- **Modo escuro** (segunda QSS alternável)
 - **Metas mensais** por categoria com alerta ao atingir X%
 - **Notificações** de cobranças próximas (assinaturas e parcelas do mês)
 - **Autenticação local** opcional (senha/fingerprint)
@@ -271,5 +274,3 @@ cp ~/.controle-financeiro/app.db ~/Desktop/app-backup-$(date +%Y%m%d).db
 ## Licença
 
 Uso pessoal — adapte como quiser.
-
-#

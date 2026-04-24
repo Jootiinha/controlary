@@ -1,11 +1,5 @@
 .PHONY: help install install-all run icon build-mac build-win clean reset-db check test test-cov
 
-ifeq ($(OS),Windows_NT)
-  PYTHON ?= py -3
-else
-  PYTHON ?= python3.13
-endif
-
 POETRY ?= poetry
 
 VENV_STAMP      := .venv/.installed

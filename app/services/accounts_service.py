@@ -5,8 +5,11 @@ import sqlite3
 import uuid
 from typing import List, Optional
 
-from app.database.connection import transaction
+from app.database.connection import transaction, use
+from app.events import app_events
 from app.models.account import Account
+from app.repositories import account_transactions_repo, accounts_repo
+from app.services.ledger import LedgerKey
 
 
 def upsert_transaction(
@@ -21,28 +24,20 @@ def upsert_transaction(
     """Insere ou substitui movimentação com a mesma transaction_key (idempotente)."""
 
     def _run(c: sqlite3.Connection) -> int:
-        row = c.execute(
-            "SELECT id FROM accounts WHERE id = ?", (account_id,)
-        ).fetchone()
-        if not row:
+        if not account_transactions_repo.account_exists(c, account_id):
             raise ValueError("Conta inválida")
-        c.execute(
-            "DELETE FROM account_transactions WHERE transaction_key = ?",
-            (transaction_key,),
+        account_transactions_repo.delete_by_key(c, transaction_key)
+        return account_transactions_repo.insert_transaction(
+            c,
+            account_id=account_id,
+            data=data,
+            valor=valor,
+            origem=origem,
+            transaction_key=transaction_key,
+            descricao=descricao,
         )
-        cur = c.execute(
-            """
-            INSERT INTO account_transactions (
-                account_id, data, valor, origem, transaction_key, descricao
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (account_id, data, valor, origem, transaction_key, descricao),
-        )
-        return int(cur.lastrowid)
 
-    if conn is not None:
-        return _run(conn)
-    with transaction() as c:
+    with use(conn) as c:
         return _run(c)
 
 
@@ -50,16 +45,10 @@ def remove_transaction_key(
     transaction_key: str, conn: Optional[sqlite3.Connection] = None
 ) -> None:
     def _run(c: sqlite3.Connection) -> None:
-        c.execute(
-            "DELETE FROM account_transactions WHERE transaction_key = ?",
-            (transaction_key,),
-        )
+        account_transactions_repo.delete_by_key(c, transaction_key)
 
-    if conn is not None:
-        _run(conn)
-    else:
-        with transaction() as c:
-            _run(c)
+    with use(conn) as c:
+        _run(c)
 
 
 def remove_transaction_keys_like_prefix(
@@ -68,66 +57,47 @@ def remove_transaction_keys_like_prefix(
     """Remove movimentações cujo transaction_key começa com prefix (ex.: 'fixed:3:')."""
 
     def _run(c: sqlite3.Connection) -> None:
-        c.execute(
-            "DELETE FROM account_transactions WHERE transaction_key LIKE ?",
-            (prefix + "%",),
-        )
+        account_transactions_repo.delete_keys_like_prefix(c, prefix)
 
-    if conn is not None:
-        _run(conn)
-    else:
-        with transaction() as c:
-            _run(c)
+    with use(conn) as c:
+        _run(c)
 
 
 def transaction_key_payment(payment_id: int) -> str:
-    return f"payment:{payment_id}"
+    return LedgerKey.payment(payment_id)
 
 
 def transaction_key_invoice(invoice_id: int) -> str:
-    return f"invoice:{invoice_id}"
+    return LedgerKey.invoice(invoice_id)
 
 
 def transaction_key_fixed(fe_id: int, ano_mes: str) -> str:
-    return f"fixed:{fe_id}:{ano_mes}"
+    return LedgerKey.fixed(fe_id, ano_mes)
 
 
 def transaction_key_subscription(sub_id: int, ano_mes: str) -> str:
-    return f"subscription:{sub_id}:{ano_mes}"
+    return LedgerKey.subscription(sub_id, ano_mes)
 
 
 def transaction_key_installment(inst_id: int, ano_mes: str) -> str:
-    return f"installment:{inst_id}:{ano_mes}"
+    return LedgerKey.installment(inst_id, ano_mes)
 
 
 def transaction_key_income(src_id: int, ano_mes: str) -> str:
-    return f"income:{src_id}:{ano_mes}"
+    return LedgerKey.income(src_id, ano_mes)
 
 
 def current_balance(account_id: int, conn: Optional[sqlite3.Connection] = None) -> float:
     """Saldo até hoje: saldo_inicial + soma das movimentações com data <= hoje."""
 
     def _run(c: sqlite3.Connection) -> float:
-        row = c.execute(
-            "SELECT saldo_inicial FROM accounts WHERE id = ?", (account_id,)
-        ).fetchone()
-        if not row:
+        base = account_transactions_repo.fetch_saldo_inicial(c, account_id)
+        if base is None:
             return 0.0
-        base = float(row["saldo_inicial"] or 0)
-        r2 = c.execute(
-            """
-            SELECT COALESCE(SUM(valor), 0) AS t
-              FROM account_transactions
-             WHERE account_id = ?
-               AND date(data) <= date('now', 'localtime')
-            """,
-            (account_id,),
-        ).fetchone()
-        return round(base + float(r2["t"] or 0), 2)
+        t = account_transactions_repo.sum_for_account_until_today(c, account_id)
+        return round(base + t, 2)
 
-    if conn is not None:
-        return _run(conn)
-    with transaction() as c:
+    with use(conn) as c:
         return _run(c)
 
 
@@ -135,15 +105,12 @@ def sum_balances(conn: Optional[sqlite3.Connection] = None) -> float:
     """Soma dos saldos atuais de todas as contas."""
 
     def _run(c: sqlite3.Connection) -> float:
-        rows = c.execute("SELECT id FROM accounts").fetchall()
         total = 0.0
-        for r in rows:
-            total += current_balance(int(r["id"]), c)
+        for aid in account_transactions_repo.list_account_ids(c):
+            total += current_balance(aid, c)
         return round(total, 2)
 
-    if conn is not None:
-        return _run(conn)
-    with transaction() as c:
+    with use(conn) as c:
         return _run(c)
 
 
@@ -167,128 +134,74 @@ def post_adjustment(
     )
 
 
-def list_all() -> List[Account]:
-    with transaction() as conn:
-        rows = conn.execute(
-            """
-            SELECT a.id, a.nome, a.observacao, a.saldo_inicial,
-                   a.saldo_inicial + COALESCE((
-                     SELECT SUM(t.valor)
-                       FROM account_transactions t
-                      WHERE t.account_id = a.id
-                        AND date(t.data) <= date('now', 'localtime')
-                   ), 0) AS saldo_atual
-              FROM accounts a
-             ORDER BY a.nome COLLATE NOCASE
-            """
-        ).fetchall()
+def list_all(conn: Optional[sqlite3.Connection] = None) -> List[Account]:
+    with use(conn) as c:
+        rows = accounts_repo.list_all(c)
     return [Account.from_row(r) for r in rows]
 
 
-def get(account_id: int) -> Optional[Account]:
-    with transaction() as conn:
-        row = conn.execute(
-            """
-            SELECT a.id, a.nome, a.observacao, a.saldo_inicial,
-                   a.saldo_inicial + COALESCE((
-                     SELECT SUM(t.valor)
-                       FROM account_transactions t
-                      WHERE t.account_id = a.id
-                        AND date(t.data) <= date('now', 'localtime')
-                   ), 0) AS saldo_atual
-              FROM accounts a
-             WHERE a.id = ?
-            """,
-            (account_id,),
-        ).fetchone()
+def get(account_id: int, conn: Optional[sqlite3.Connection] = None) -> Optional[Account]:
+    with use(conn) as c:
+        row = accounts_repo.get(c, account_id)
     return Account.from_row(row) if row else None
 
 
-def create(acc: Account) -> int:
-    with transaction() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO accounts (nome, observacao, saldo_inicial)
-            VALUES (?, ?, ?)
-            """,
-            (acc.nome.strip(), acc.observacao, float(acc.saldo_inicial)),
+def get_or_unknown(
+    account_id: Optional[int], label: str = "—", conn: Optional[sqlite3.Connection] = None
+) -> Account:
+    if account_id is None:
+        return Account.unknown(label)
+    acc = get(account_id, conn=conn)
+    return acc if acc is not None else Account.unknown(label)
+
+
+def create(acc: Account, conn: Optional[sqlite3.Connection] = None) -> int:
+    with use(conn) as c:
+        pid = accounts_repo.insert(
+            c,
+            nome=acc.nome.strip(),
+            observacao=acc.observacao,
+            saldo_inicial=float(acc.saldo_inicial),
         )
-        return int(cur.lastrowid)
+    app_events().accounts_changed.emit()
+    return pid
 
 
-def update(acc: Account) -> None:
+def update(acc: Account, conn: Optional[sqlite3.Connection] = None) -> None:
     if acc.id is None:
         raise ValueError("Conta sem id")
-    with transaction() as conn:
-        conn.execute(
-            """
-            UPDATE accounts
-               SET nome = ?, observacao = ?, saldo_inicial = ?
-             WHERE id = ?
-            """,
-            (acc.nome.strip(), acc.observacao, float(acc.saldo_inicial), acc.id),
+    with use(conn) as c:
+        accounts_repo.update(
+            c,
+            account_id=int(acc.id),
+            nome=acc.nome.strip(),
+            observacao=acc.observacao,
+            saldo_inicial=float(acc.saldo_inicial),
         )
+    app_events().accounts_changed.emit()
 
 
-def delete(account_id: int) -> None:
-    if count_references(account_id) > 0:
+def delete(account_id: int, conn: Optional[sqlite3.Connection] = None) -> None:
+    if count_references(account_id, conn=conn) > 0:
         raise ValueError(
-            "Esta conta está em uso em pagamentos, assinaturas ou cartões vinculados. "
-            "Altere os registros antes de excluir."
+            "Esta conta está em uso (pagamentos, assinaturas, cartões, livro-caixa ou outros "
+            "vínculos). Altere ou mova os registros antes de excluir."
         )
-    with transaction() as conn:
-        conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+    with use(conn) as c:
+        accounts_repo.delete(c, account_id)
+    app_events().accounts_changed.emit()
 
 
-def count_references(account_id: int) -> int:
-    with transaction() as conn:
-        row = conn.execute(
-            """
-            SELECT (
-                SELECT COUNT(*) FROM payments WHERE conta_id = ?
-            ) + (
-                SELECT COUNT(*) FROM subscriptions WHERE account_id = ?
-            ) + (
-                SELECT COUNT(*) FROM cards WHERE account_id = ?
-            ) + (
-                SELECT COUNT(*) FROM fixed_expenses WHERE conta_id = ?
-            ) + (
-                SELECT COUNT(*) FROM investments WHERE banco_id = ?
-            ) + (
-                SELECT COUNT(*) FROM income_sources WHERE account_id = ?
-            ) + (
-                SELECT COUNT(*) FROM installments WHERE account_id = ?
-            ) AS n
-            """,
-            (
-                account_id,
-                account_id,
-                account_id,
-                account_id,
-                account_id,
-                account_id,
-                account_id,
-            ),
-        ).fetchone()
-    return int(row["n"] or 0) if row else 0
+def count_references(account_id: int, conn: Optional[sqlite3.Connection] = None) -> int:
+    with use(conn) as c:
+        return accounts_repo.count_references(c, account_id)
 
 
 def sum_debits_in_month(ano_mes: str, conn: Optional[sqlite3.Connection] = None) -> float:
     """Soma valores negativos (saídas) no mês YYYY-MM em todas as contas."""
 
     def _run(c: sqlite3.Connection) -> float:
-        row = c.execute(
-            """
-            SELECT COALESCE(SUM(valor), 0) AS t
-              FROM account_transactions
-             WHERE substr(data, 1, 7) = ?
-               AND valor < 0
-            """,
-            (ano_mes,),
-        ).fetchone()
-        return round(float(row["t"] or 0), 2)
+        return round(account_transactions_repo.sum_debits_in_month(c, ano_mes), 2)
 
-    if conn is not None:
-        return _run(conn)
-    with transaction() as c:
+    with use(conn) as c:
         return _run(c)

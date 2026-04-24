@@ -1,27 +1,23 @@
 """Investimentos e snapshots de valor."""
 from __future__ import annotations
 
+import sqlite3
 from datetime import date, datetime
 from typing import List, Optional
 
-from app.database.connection import transaction
+from app.database.connection import use
+from app.events import app_events
 from app.models.investment import Investment, InvestmentSnapshot
+from app.repositories import investments_repo
 
 _DAYS_PER_YEAR = 365.25
 
 
-def list_all(include_inactive: bool = False) -> List[Investment]:
-    with transaction() as conn:
-        q = """
-            SELECT i.*, a.nome AS banco_nome, cat.nome AS categoria_nome
-              FROM investments i
-              JOIN accounts a ON a.id = i.banco_id
-              LEFT JOIN categories cat ON cat.id = i.category_id
-        """
-        if not include_inactive:
-            q += " WHERE i.ativo = 1"
-        q += " ORDER BY i.nome COLLATE NOCASE"
-        rows = conn.execute(q).fetchall()
+def list_all(
+    include_inactive: bool = False, conn: Optional[sqlite3.Connection] = None
+) -> List[Investment]:
+    with use(conn) as c:
+        rows = investments_repo.list_all(c, include_inactive)
     return [Investment.from_row(r) for r in rows]
 
 
@@ -101,7 +97,9 @@ def _parse_iso(d: str) -> date:
     return datetime.strptime(d.strip(), "%Y-%m-%d").date()
 
 
-def _cagr_percent_aa(v_ini: float, d_ini: str, v_fim: float, d_fim: str) -> Optional[float]:
+def _cagr_percent_aa(
+    v_ini: float, d_ini: str, v_fim: float, d_fim: str
+) -> Optional[float]:
     """Taxa composta anual implícita; ano civil médio via 365.25 dias."""
     if v_ini <= 0 or v_fim <= 0:
         return None
@@ -122,26 +120,11 @@ def _cagr_percent_aa(v_ini: float, d_ini: str, v_fim: float, d_fim: str) -> Opti
         return None
 
 
-def _recalculate_rendimento_aa_conn(conn, inv_id: int) -> None:
-    row = conn.execute(
-        """
-        SELECT valor_aplicado, data_aplicacao
-          FROM investments
-         WHERE id = ?
-        """,
-        (inv_id,),
-    ).fetchone()
+def _recalculate_rendimento_aa_conn(conn: sqlite3.Connection, inv_id: int) -> None:
+    row = investments_repo.fetch_valor_aplicado_data(conn, inv_id)
     if row is None:
         return
-    snap_rows = conn.execute(
-        """
-        SELECT data, valor_atual
-          FROM investment_snapshots
-         WHERE investment_id = ?
-         ORDER BY date(data)
-        """,
-        (inv_id,),
-    ).fetchall()
+    snap_rows = investments_repo.list_snapshots_ordered(conn, inv_id)
     if not snap_rows:
         return
     v_ini = float(row["valor_aplicado"] or 0)
@@ -152,126 +135,87 @@ def _recalculate_rendimento_aa_conn(conn, inv_id: int) -> None:
     pct = _cagr_percent_aa(v_ini, d_ini, v_fim, d_fim)
     if pct is None:
         return
-    conn.execute(
-        "UPDATE investments SET rendimento_percentual_aa = ? WHERE id = ?",
-        (pct, inv_id),
-    )
+    investments_repo.update_rendimento_aa(conn, inv_id, pct)
 
 
-def get(inv_id: int) -> Optional[Investment]:
-    with transaction() as conn:
-        row = conn.execute(
-            """
-            SELECT i.*, a.nome AS banco_nome, cat.nome AS categoria_nome
-              FROM investments i
-              JOIN accounts a ON a.id = i.banco_id
-              LEFT JOIN categories cat ON cat.id = i.category_id
-             WHERE i.id = ?
-            """,
-            (inv_id,),
-        ).fetchone()
+def get(inv_id: int, conn: Optional[sqlite3.Connection] = None) -> Optional[Investment]:
+    with use(conn) as c:
+        row = investments_repo.get_row(c, inv_id)
     return Investment.from_row(row) if row else None
 
 
-def create(inv: Investment) -> int:
-    with transaction() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO investments (
-                banco_id, nome, tipo, valor_aplicado, rendimento_percentual_aa,
-                data_aplicacao, data_vencimento, category_id, observacao, ativo
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                inv.banco_id,
-                inv.nome.strip(),
-                inv.tipo,
-                inv.valor_aplicado,
-                inv.rendimento_percentual_aa,
-                inv.data_aplicacao,
-                inv.data_vencimento,
-                inv.category_id,
-                inv.observacao,
-                1 if inv.ativo else 0,
-            ),
+def create(
+    inv: Investment, conn: Optional[sqlite3.Connection] = None
+) -> int:
+    with use(conn) as c:
+        pid = investments_repo.insert_investment(
+            c,
+            banco_id=int(inv.banco_id),
+            nome=inv.nome.strip(),
+            tipo=inv.tipo,
+            valor_aplicado=float(inv.valor_aplicado),
+            rendimento_percentual_aa=inv.rendimento_percentual_aa,
+            data_aplicacao=inv.data_aplicacao,
+            data_vencimento=inv.data_vencimento,
+            category_id=inv.category_id,
+            observacao=inv.observacao,
+            ativo=1 if inv.ativo else 0,
         )
-        return int(cur.lastrowid)
+    app_events().investments_changed.emit()
+    return pid
 
 
-def update(inv: Investment) -> None:
+def update(
+    inv: Investment, conn: Optional[sqlite3.Connection] = None
+) -> None:
     if inv.id is None:
         raise ValueError("Investimento sem id")
-    with transaction() as conn:
-        conn.execute(
-            """
-            UPDATE investments
-               SET banco_id = ?, nome = ?, tipo = ?, valor_aplicado = ?,
-                   rendimento_percentual_aa = ?, data_aplicacao = ?, data_vencimento = ?,
-                   category_id = ?, observacao = ?, ativo = ?
-             WHERE id = ?
-            """,
-            (
-                inv.banco_id,
-                inv.nome.strip(),
-                inv.tipo,
-                inv.valor_aplicado,
-                inv.rendimento_percentual_aa,
-                inv.data_aplicacao,
-                inv.data_vencimento,
-                inv.category_id,
-                inv.observacao,
-                1 if inv.ativo else 0,
-                inv.id,
-            ),
+    with use(conn) as c:
+        investments_repo.update_investment(
+            c,
+            inv_id=int(inv.id),
+            banco_id=int(inv.banco_id),
+            nome=inv.nome.strip(),
+            tipo=inv.tipo,
+            valor_aplicado=float(inv.valor_aplicado),
+            rendimento_percentual_aa=inv.rendimento_percentual_aa,
+            data_aplicacao=inv.data_aplicacao,
+            data_vencimento=inv.data_vencimento,
+            category_id=inv.category_id,
+            observacao=inv.observacao,
+            ativo=1 if inv.ativo else 0,
         )
-        _recalculate_rendimento_aa_conn(conn, inv.id)
+        _recalculate_rendimento_aa_conn(c, int(inv.id))
+    app_events().investments_changed.emit()
 
 
-def delete(inv_id: int) -> None:
-    with transaction() as conn:
-        conn.execute("DELETE FROM investments WHERE id = ?", (inv_id,))
+def delete(inv_id: int, conn: Optional[sqlite3.Connection] = None) -> None:
+    with use(conn) as c:
+        investments_repo.delete_investment(c, inv_id)
+    app_events().investments_changed.emit()
 
 
-def total_aplicado() -> float:
-    with transaction() as conn:
-        row = conn.execute(
-            """
-            SELECT COALESCE(SUM(valor_aplicado), 0) AS t
-              FROM investments
-             WHERE ativo = 1
-            """
-        ).fetchone()
-    return float(row["t"] or 0)
+def total_aplicado(conn: Optional[sqlite3.Connection] = None) -> float:
+    with use(conn) as c:
+        return investments_repo.sum_aplicado_ativo(c)
 
 
-def add_snapshot(inv_id: int, data: str, valor_atual: float) -> None:
-    with transaction() as conn:
-        conn.execute(
-            """
-            DELETE FROM investment_snapshots
-             WHERE investment_id = ? AND data = ?
-            """,
-            (inv_id, data),
-        )
-        conn.execute(
-            """
-            INSERT INTO investment_snapshots (investment_id, data, valor_atual)
-            VALUES (?, ?, ?)
-            """,
-            (inv_id, data, valor_atual),
-        )
-        _recalculate_rendimento_aa_conn(conn, inv_id)
+def add_snapshot(
+    inv_id: int,
+    data: str,
+    valor_atual: float,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    with use(conn) as c:
+        investments_repo.delete_snapshot_on_date(c, inv_id, data)
+        investments_repo.insert_snapshot(c, inv_id, data, valor_atual)
+        _recalculate_rendimento_aa_conn(c, inv_id)
+    app_events().investments_changed.emit()
 
 
-def list_snapshots(inv_id: int) -> List[InvestmentSnapshot]:
-    with transaction() as conn:
-        rows = conn.execute(
-            """
-            SELECT investment_id, data, valor_atual
-              FROM investment_snapshots
-             WHERE investment_id = ?
-             ORDER BY date(data)
-            """,
-            (inv_id,),
-        ).fetchall()
+def list_snapshots(
+    inv_id: int, conn: Optional[sqlite3.Connection] = None
+) -> List[InvestmentSnapshot]:
+    with use(conn) as c:
+        rows = investments_repo.list_snapshots(c, inv_id)
     return [InvestmentSnapshot.from_row(r) for r in rows]

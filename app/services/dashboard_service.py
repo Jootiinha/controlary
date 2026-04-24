@@ -1,10 +1,13 @@
 """Agregações para o dashboard."""
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
-from app.database.connection import transaction
+from app.database.connection import use
+from app.repositories import dashboard_repo
+from app.models.income_source import installment_month_applies
 from app.services import (
     accounts_service,
     calendar_service,
@@ -16,6 +19,38 @@ from app.services import (
 )
 from app.services.calendar_service import CalendarEvent
 from app.utils.formatting import current_month
+
+
+def _parcelas_conta_pendentes_no_mes(conn, ano_mes: str) -> float:
+    rows = conn.execute(
+        """
+        SELECT i.id, i.valor_parcela, i.mes_referencia, i.total_parcelas
+          FROM installments i
+         WHERE i.status = 'ativo'
+           AND i.cartao_id IS NULL
+        """
+    ).fetchall()
+    total = 0.0
+    for r in rows:
+        if not installment_month_applies(
+            str(r["mes_referencia"]),
+            int(r["total_parcelas"] or 0),
+            ano_mes,
+        ):
+            continue
+        paid = conn.execute(
+            """
+            SELECT 1 FROM installment_months im
+             WHERE im.installment_id = ?
+               AND im.ano_mes = ?
+               AND im.status = 'pago'
+            """,
+            (int(r["id"]), ano_mes),
+        ).fetchone()
+        if paid:
+            continue
+        total += float(r["valor_parcela"] or 0)
+    return total
 
 
 @dataclass
@@ -50,107 +85,33 @@ class DashboardData:
     saldo_projetado_fim_mes: float = 0.0
 
 
-def cost_of_living(ano_mes: str) -> float:
+def cost_of_living(
+    ano_mes: str, conn: Optional[sqlite3.Connection] = None
+) -> float:
     """Comprometimento do mês (previsto): avulsos em conta, faturas de cartão (sem somar compras
     duas vezes), parcelas e assinaturas em conta pendentes na competência, fixos ativos ainda não
     pagos no mês. Inclui todos os pagamentos em conta do mês (tabela ``payments``), não exclui
     quem já tem espelho no livro-caixa — o ``previsto_breakdown`` é que evita duplicar com o
     livro para o card de previsto."""
-    with transaction() as conn:
-        row = conn.execute(
-            """
-            SELECT COALESCE(SUM(p.valor), 0) AS t
-              FROM payments p
-             WHERE substr(p.data, 1, 7) = ?
-               AND p.cartao_id IS NULL
-               AND p.conta_id IS NOT NULL
-            """,
-            (ano_mes,),
-        ).fetchone()
-        avulsos_conta = float(row["t"] or 0)
-
-        row = conn.execute(
-            """
-            SELECT COALESCE(SUM(s.valor_mensal), 0) AS t
-              FROM subscriptions s
-             WHERE s.status = 'ativa'
-               AND s.card_id IS NULL
-               AND NOT EXISTS (
-                   SELECT 1 FROM subscription_months sm
-                    WHERE sm.subscription_id = s.id
-                      AND sm.ano_mes = ?
-                      AND sm.status = 'pago'
-               )
-            """,
-            (ano_mes,),
-        ).fetchone()
-        assinaturas_conta = float(row["t"] or 0)
-
-        row = conn.execute(
-            """
-            SELECT COALESCE(SUM(i.valor_parcela), 0) AS t
-              FROM installments i
-             WHERE i.status = 'ativo'
-               AND i.cartao_id IS NULL
-               AND i.mes_referencia = ?
-               AND NOT EXISTS (
-                   SELECT 1 FROM installment_months im
-                    WHERE im.installment_id = i.id
-                      AND im.ano_mes = ?
-                      AND im.status = 'pago'
-               )
-            """,
-            (ano_mes, ano_mes),
-        ).fetchone()
-        parcelas_conta = float(row["t"] or 0)
+    with use(conn) as c:
+        avulsos_conta = dashboard_repo.sum_payments_conta_in_month(c, ano_mes)
+        assinaturas_conta = dashboard_repo.sum_subscriptions_conta_pending_month(
+            c, ano_mes
+        )
+        parcelas_conta = _parcelas_conta_pendentes_no_mes(c, ano_mes)
 
     fixos = fixed_expenses_service.sum_unpaid_for_month(ano_mes)
 
-    with transaction() as conn:
+    with use(conn) as c:
         faturas_cartao = 0.0
-        for cr in conn.execute("SELECT id FROM cards").fetchall():
-            cid = int(cr["id"])
-            inv = conn.execute(
-                """
-                SELECT COALESCE(valor_total, 0) AS vt
-                  FROM card_invoices
-                 WHERE cartao_id = ? AND ano_mes = ?
-                """,
-                (cid, ano_mes),
-            ).fetchone()
+        for cid in dashboard_repo.list_card_ids(c):
+            inv = dashboard_repo.fetch_invoice_valor_status(c, cid, ano_mes)
             vt = float(inv["vt"]) if inv else 0.0
-            if vt > 0:
+            st = str(inv["status"]) if inv else "aberta"
+            if vt > 0 and st != "paga":
                 faturas_cartao += vt
                 continue
-            r1 = conn.execute(
-                """
-                SELECT COALESCE(SUM(valor_parcela), 0) AS t
-                  FROM installments
-                 WHERE status = 'ativo'
-                   AND cartao_id = ?
-                   AND mes_referencia = ?
-                """,
-                (cid, ano_mes),
-            ).fetchone()
-            r2 = conn.execute(
-                """
-                SELECT COALESCE(SUM(valor_mensal), 0) AS t
-                  FROM subscriptions
-                 WHERE status = 'ativa'
-                   AND card_id = ?
-                """,
-                (cid,),
-            ).fetchone()
-            r3 = conn.execute(
-                """
-                SELECT COALESCE(SUM(valor), 0) AS t
-                  FROM payments
-                 WHERE cartao_id = ?
-                   AND substr(data, 1, 7) = ?
-                """,
-                (cid, ano_mes),
-            ).fetchone()
-            v = float(r1["t"] or 0) + float(r2["t"] or 0) + float(r3["t"] or 0)
+            v = card_invoices_service.suggested_total(cid, ano_mes)
             if v > 0:
                 faturas_cartao += v
 
@@ -183,7 +144,9 @@ class PrevistoMesBreakdown:
         )
 
 
-def previsto_breakdown_for(ano_mes: str) -> PrevistoMesBreakdown:
+def previsto_breakdown_for(
+    ano_mes: str, conn: Optional[sqlite3.Connection] = None
+) -> PrevistoMesBreakdown:
     previsto_faturas = 0.0
     for card in cards_service.list_all():
         if card.id is None:
@@ -197,57 +160,14 @@ def previsto_breakdown_for(ano_mes: str) -> PrevistoMesBreakdown:
             continue
         previsto_faturas += v
 
-    with transaction() as conn:
-        row = conn.execute(
-            """
-            SELECT COALESCE(SUM(s.valor_mensal), 0) AS total
-              FROM subscriptions s
-             WHERE s.status = 'ativa'
-               AND s.card_id IS NULL
-               AND NOT EXISTS (
-                   SELECT 1 FROM subscription_months sm
-                    WHERE sm.subscription_id = s.id
-                      AND sm.ano_mes = ?
-                      AND sm.status = 'pago'
-               )
-            """,
-            (ano_mes,),
-        ).fetchone()
-        assinaturas_conta = float(row["total"] or 0)
-
-        row = conn.execute(
-            """
-            SELECT COALESCE(SUM(i.valor_parcela), 0) AS total
-              FROM installments i
-             WHERE i.status = 'ativo'
-               AND i.cartao_id IS NULL
-               AND i.mes_referencia = ?
-               AND NOT EXISTS (
-                   SELECT 1 FROM installment_months im
-                    WHERE im.installment_id = i.id
-                      AND im.ano_mes = ?
-                      AND im.status = 'pago'
-               )
-            """,
-            (ano_mes, ano_mes),
-        ).fetchone()
-        parcelas_conta = float(row["total"] or 0)
-
-        row = conn.execute(
-            """
-            SELECT COALESCE(SUM(p.valor), 0) AS total
-              FROM payments p
-             WHERE substr(p.data, 1, 7) = ?
-               AND p.cartao_id IS NULL
-               AND p.conta_id IS NOT NULL
-               AND NOT EXISTS (
-                   SELECT 1 FROM account_transactions t
-                    WHERE t.transaction_key = ('payment:' || p.id)
-               )
-            """,
-            (ano_mes,),
-        ).fetchone()
-        avulsos = float(row["total"] or 0)
+    with use(conn) as c:
+        assinaturas_conta = dashboard_repo.sum_subscriptions_conta_pending_month(
+            c, ano_mes
+        )
+        parcelas_conta = _parcelas_conta_pendentes_no_mes(c, ano_mes)
+        avulsos = dashboard_repo.sum_payments_conta_month_without_ledger_mirror(
+            c, ano_mes
+        )
 
     fixos_pend = fixed_expenses_service.sum_unpaid_for_month(ano_mes)
 
@@ -260,63 +180,39 @@ def previsto_breakdown_for(ano_mes: str) -> PrevistoMesBreakdown:
     )
 
 
-def previsto_mes_for(ano_mes: str) -> float:
-    return previsto_breakdown_for(ano_mes).total()
+def previsto_mes_for(
+    ano_mes: str, conn: Optional[sqlite3.Connection] = None
+) -> float:
+    return previsto_breakdown_for(ano_mes, conn=conn).total()
 
 
-def load(mes: str | None = None) -> DashboardData:
+def load(
+    mes: str | None = None, conn: Optional[sqlite3.Connection] = None
+) -> DashboardData:
     mes = mes or current_month()
     data = DashboardData(mes_referencia=mes)
 
-    with transaction() as conn:
-        row = conn.execute(
-            "SELECT COALESCE(SUM(valor), 0) AS total FROM payments WHERE substr(data, 1, 7) = ?",
-            (mes,),
-        ).fetchone()
-        data.total_gasto_mes = float(row["total"] or 0)
+    with use(conn) as c:
+        deb = accounts_service.sum_debits_in_month(mes, conn=c)
+        data.total_gasto_mes = round(-deb, 2) if deb < 0 else round(deb, 2)
 
-        row = conn.execute(
-            """
-            SELECT COUNT(*) AS qtd
-              FROM subscriptions
-             WHERE status = 'ativa'
-               AND card_id IS NULL
-            """
-        ).fetchone()
-        data.assinaturas_ativas_qtd = int(row["qtd"] or 0)
+        data.assinaturas_ativas_qtd = dashboard_repo.count_subscriptions_ativas_conta(
+            c
+        )
 
-        row = conn.execute(
-            """
-            SELECT COUNT(*) AS qtd,
-                   COALESCE(SUM(valor_mensal), 0) AS total,
-                   COALESCE(SUM(CASE WHEN card_id IS NULL THEN 1 ELSE 0 END), 0) AS em_conta,
-                   COALESCE(SUM(CASE WHEN card_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS no_cartao
-              FROM subscriptions
-             WHERE status = 'ativa'
-            """
-        ).fetchone()
+        row = dashboard_repo.row_subscriptions_kpi(c)
         data.assinaturas_kpi_qtd = int(row["qtd"] or 0)
         data.assinaturas_kpi_valor_mensal = float(row["total"] or 0)
         data.assinaturas_kpi_em_conta_qtd = int(row["em_conta"] or 0)
         data.assinaturas_kpi_no_cartao_qtd = int(row["no_cartao"] or 0)
 
-        row = conn.execute(
-            "SELECT COUNT(*) AS qtd FROM installments WHERE status = 'ativo'"
-        ).fetchone()
-        data.parcelamentos_ativos_qtd = int(row["qtd"] or 0)
-
-        row = conn.execute(
-            """
-            SELECT COALESCE(SUM(valor_parcela * (total_parcelas - parcelas_pagas)), 0) AS saldo
-              FROM installments WHERE status = 'ativo'
-            """
-        ).fetchone()
-        data.saldo_devedor_total = float(row["saldo"] or 0)
+        data.parcelamentos_ativos_qtd = dashboard_repo.count_installments_ativos(c)
+        data.saldo_devedor_total = dashboard_repo.sum_saldo_devedor_parcelas(c)
 
         data.fixos_restante_ano = fixed_expenses_service.sum_unpaid_rest_of_calendar_year()
         data.fixos_ativos_qtd = fixed_expenses_service.count_active()
 
-    bd = previsto_breakdown_for(mes)
+    bd = previsto_breakdown_for(mes, conn=conn)
     data.previsto_faturas = round(bd.previsto_faturas, 2)
     data.parcelas_mes_atual = bd.parcelas_conta_mes
     data.fixos_pendentes_mes = bd.fixos_pendentes_mes
@@ -328,35 +224,10 @@ def load(mes: str | None = None) -> DashboardData:
     data.margem_apos_previsto = data.renda_mensal_total - data.previsto_mes
     data.margem_apos_gasto = data.renda_mensal_total - data.total_gasto_mes
 
-    with transaction() as conn:
-        rows = conn.execute(
-            """
-            SELECT CASE
-                     WHEN p.cartao_id IS NOT NULL THEN 'Cartão · ' || COALESCE(c.nome, '?')
-                     ELSE COALESCE(a.nome, p.conta, '(sem conta)')
-                   END AS nome_origem,
-                   COALESCE(SUM(p.valor), 0) AS total
-              FROM payments p
-              LEFT JOIN accounts a ON a.id = p.conta_id
-              LEFT JOIN cards c ON c.id = p.cartao_id
-             WHERE substr(p.data, 1, 7) = ?
-             GROUP BY nome_origem
-             ORDER BY total DESC
-            """,
-            (mes,),
-        ).fetchall()
+    with use(conn) as c:
+        rows = dashboard_repo.gastos_por_conta_rows(c, mes)
         data.gastos_por_conta = [(r["nome_origem"], float(r["total"])) for r in rows]
-
-        rows = conn.execute(
-            """
-            SELECT forma_pagamento, COALESCE(SUM(valor), 0) AS total
-              FROM payments
-             WHERE substr(data, 1, 7) = ?
-             GROUP BY forma_pagamento
-             ORDER BY total DESC
-            """,
-            (mes,),
-        ).fetchall()
+        rows = dashboard_repo.gastos_por_forma_rows(c, mes)
         data.gastos_por_forma = [(r["forma_pagamento"], float(r["total"])) for r in rows]
 
     data.proximos_vencimentos = calendar_service.upcoming_payables(

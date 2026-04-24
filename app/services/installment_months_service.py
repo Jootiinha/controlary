@@ -1,173 +1,138 @@
 """Competência mensal de parcelamentos em conta corrente (livro-caixa)."""
 from __future__ import annotations
 
-from calendar import monthrange
-from datetime import date
+import sqlite3
+from typing import Optional
 
-from app.database.connection import transaction
+from app.database.connection import use
+from app.events import app_events
 from app.models.income_source import competencias_parcelada
+from app.repositories import installment_months_repo
 from app.services import accounts_service
+from app.services._monthly_ledger import MonthlyLedgerService
+from app.services.competencia_ledger import data_iso_no_mes
+from app.utils.mes_ano import MesAno
 
 
-def is_paid(installment_id: int, ano_mes: str) -> bool:
-    with transaction() as conn:
-        row = conn.execute(
-            """
-            SELECT status FROM installment_months
-             WHERE installment_id = ? AND ano_mes = ?
-            """,
-            (installment_id, ano_mes),
-        ).fetchone()
-    return row is not None and row["status"] == "pago"
+def is_paid(
+    installment_id: int, ano_mes: str, conn: Optional[sqlite3.Connection] = None
+) -> bool:
+    with use(conn) as c:
+        st = installment_months_repo.fetch_month_status(c, installment_id, ano_mes)
+    return st == "pago"
 
 
-def set_month_status(installment_id: int, ano_mes: str, pago: bool) -> None:
-    """Integra débito na conta quando a competência é uma parcela do cronograma (a partir de mes_referencia).
-
-    O pagamento é sequencial: só debita e incrementa ``parcelas_pagas`` quando essa competência
-    corresponde à próxima parcela esperada (índice igual a ``parcelas_pagas`` no cronograma).
-    """
-    status = "pago" if pago else "pendente"
-    key = accounts_service.transaction_key_installment(installment_id, ano_mes)
-    with transaction() as conn:
-        inst = conn.execute(
-            """
-            SELECT valor_parcela, account_id, cartao_id, mes_referencia,
-                   total_parcelas, parcelas_pagas, status
-              FROM installments
-             WHERE id = ?
-            """,
-            (installment_id,),
-        ).fetchone()
-        if not inst:
-            return
-
-        mes_ref = inst["mes_referencia"]
-        total = int(inst["total_parcelas"] or 0)
-        schedule = competencias_parcelada(mes_ref, total) if total > 0 else []
-        in_schedule = ano_mes in schedule
-        slot_idx = schedule.index(ano_mes) if in_schedule else -1
-
-        prev_row = conn.execute(
-            """
-            SELECT status FROM installment_months
-             WHERE installment_id = ? AND ano_mes = ?
-            """,
-            (installment_id, ano_mes),
-        ).fetchone()
-        was_pago = prev_row is not None and prev_row["status"] == "pago"
-
-        pagas = int(inst["parcelas_pagas"] or 0)
-
-        base = (
-            inst["cartao_id"] is None
-            and inst["account_id"] is not None
-            and in_schedule
-            and inst["status"] != "quitado"
-        )
-
-        if not base:
-            if not pago:
-                accounts_service.remove_transaction_key(key, conn=conn)
-            _upsert_month_row(conn, installment_id, ano_mes, status, pago)
-            return
-
-        if pago:
-            if was_pago:
-                _upsert_month_row(conn, installment_id, ano_mes, status, pago)
+class _InstallmentMonthLedger(MonthlyLedgerService):
+    def set_status(
+        self,
+        entity_id: int,
+        ano_mes: MesAno,
+        marcado: bool,
+        *,
+        conn: Optional[sqlite3.Connection] = None,
+        **kwargs: object,
+    ) -> None:
+        installment_id = entity_id
+        pago = marcado
+        ym = str(ano_mes)
+        status = "pago" if pago else "pendente"
+        key = accounts_service.transaction_key_installment(installment_id, ym)
+        with use(conn) as c:
+            inst = installment_months_repo.fetch_installment_for_ledger(c, installment_id)
+            if not inst:
                 return
-            if pagas != slot_idx:
-                _upsert_month_row(conn, installment_id, ano_mes, "pendente", False)
-                return
-            y, m = map(int, ano_mes.split("-"))
-            dia = min(15, monthrange(y, m)[1])
-            data = f"{y:04d}-{m:02d}-{dia:02d}"
-            accounts_service.upsert_transaction(
-                int(inst["account_id"]),
-                -float(inst["valor_parcela"]),
-                data,
-                "parcela",
-                key,
-                None,
-                conn=conn,
+
+            mes_ref = inst["mes_referencia"]
+            total = int(inst["total_parcelas"] or 0)
+            schedule = competencias_parcelada(mes_ref, total) if total > 0 else []
+            in_schedule = ym in schedule
+            slot_idx = schedule.index(ym) if in_schedule else -1
+
+            prev_st = installment_months_repo.fetch_month_status(
+                c, installment_id, ym
             )
-            inst2 = conn.execute(
-                """
-                SELECT parcelas_pagas, total_parcelas FROM installments WHERE id = ?
-                """,
-                (installment_id,),
-            ).fetchone()
-            if inst2:
-                novo = min(
-                    int(inst2["parcelas_pagas"] or 0) + 1,
-                    int(inst2["total_parcelas"]),
+            was_pago = prev_st == "pago"
+
+            pagas = int(inst["parcelas_pagas"] or 0)
+
+            base = (
+                inst["cartao_id"] is None
+                and inst["account_id"] is not None
+                and in_schedule
+                and inst["status"] != "quitado"
+            )
+
+            if not base:
+                if not pago:
+                    accounts_service.remove_transaction_key(key, conn=c)
+                installment_months_repo.upsert_month(
+                    c, installment_id, ym, status, pago=pago
                 )
-                tot = int(inst2["total_parcelas"])
-                st = "quitado" if novo >= tot else "ativo"
-                conn.execute(
-                    """
-                    UPDATE installments
-                       SET parcelas_pagas = ?, status = ?
-                     WHERE id = ?
-                    """,
-                    (novo, st, installment_id),
+                app_events().installments_changed.emit()
+                return
+
+            if pago:
+                if was_pago:
+                    installment_months_repo.upsert_month(
+                        c, installment_id, ym, status, pago=pago
+                    )
+                    app_events().installments_changed.emit()
+                    return
+                if pagas != slot_idx:
+                    installment_months_repo.upsert_month(
+                        c, installment_id, ym, "pendente", pago=False
+                    )
+                    app_events().installments_changed.emit()
+                    return
+                data = data_iso_no_mes(ym, 15)
+                accounts_service.upsert_transaction(
+                    int(inst["account_id"]),
+                    -float(inst["valor_parcela"]),
+                    data,
+                    "parcela",
+                    key,
+                    None,
+                    conn=c,
                 )
+                inst2 = installment_months_repo.fetch_parcels_row(c, installment_id)
+                if inst2:
+                    novo = min(
+                        int(inst2["parcelas_pagas"] or 0) + 1,
+                        int(inst2["total_parcelas"]),
+                    )
+                    tot = int(inst2["total_parcelas"])
+                    st_inst = "quitado" if novo >= tot else "ativo"
+                    installment_months_repo.update_installment_parcels(
+                        c, installment_id, novo, st_inst
+                    )
 
-            _upsert_month_row(conn, installment_id, ano_mes, status, pago)
-            return
-
-        accounts_service.remove_transaction_key(key, conn=conn)
-        if was_pago and pagas == slot_idx + 1:
-            inst2 = conn.execute(
-                """
-                SELECT parcelas_pagas, total_parcelas FROM installments WHERE id = ?
-                """,
-                (installment_id,),
-            ).fetchone()
-            if inst2 and int(inst2["parcelas_pagas"] or 0) > 0:
-                novo = int(inst2["parcelas_pagas"] or 0) - 1
-                tot = int(inst2["total_parcelas"])
-                st = "quitado" if novo >= tot else "ativo"
-                conn.execute(
-                    """
-                    UPDATE installments
-                       SET parcelas_pagas = ?, status = ?
-                     WHERE id = ?
-                    """,
-                    (max(0, novo), st, installment_id),
+                installment_months_repo.upsert_month(
+                    c, installment_id, ym, status, pago=pago
                 )
+                app_events().installments_changed.emit()
+                return
 
-        _upsert_month_row(conn, installment_id, ano_mes, status, pago)
+            accounts_service.remove_transaction_key(key, conn=c)
+            if was_pago and pagas == slot_idx + 1:
+                inst2 = installment_months_repo.fetch_parcels_row(c, installment_id)
+                if inst2 and int(inst2["parcelas_pagas"] or 0) > 0:
+                    novo = int(inst2["parcelas_pagas"] or 0) - 1
+                    tot = int(inst2["total_parcelas"])
+                    st_inst = "quitado" if novo >= tot else "ativo"
+                    installment_months_repo.update_installment_parcels(
+                        c, installment_id, max(0, novo), st_inst
+                    )
+
+            installment_months_repo.upsert_month(
+                c, installment_id, ym, status, pago=pago
+            )
+        app_events().installments_changed.emit()
 
 
-def _upsert_month_row(
-    conn,
-    installment_id: int,
-    ano_mes: str,
-    status: str,
-    pago: bool,
+_INS = _InstallmentMonthLedger()
+
+
+def set_month_status(
+    installment_id: int, ano_mes: str, pago: bool, conn: Optional[sqlite3.Connection] = None
 ) -> None:
-    row = conn.execute(
-        """
-        SELECT 1 FROM installment_months
-         WHERE installment_id = ? AND ano_mes = ?
-        """,
-        (installment_id, ano_mes),
-    ).fetchone()
-    paid_at = date.today().isoformat() if pago else None
-    if row:
-        conn.execute(
-            """
-            UPDATE installment_months SET status = ?, paid_at = ?
-             WHERE installment_id = ? AND ano_mes = ?
-            """,
-            (status, paid_at, installment_id, ano_mes),
-        )
-    else:
-        conn.execute(
-            """
-            INSERT INTO installment_months (installment_id, ano_mes, status, paid_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (installment_id, ano_mes, status, paid_at),
-        )
+    _INS.set_status(installment_id, MesAno.from_str(ano_mes), pago, conn=conn)

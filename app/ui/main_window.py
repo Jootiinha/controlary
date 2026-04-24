@@ -3,8 +3,16 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QSettings, QSize, Qt
-from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QFont
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QBrush,
+    QColor,
+    QFont,
+    QFontMetrics,
+    QPalette,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
@@ -32,6 +40,7 @@ from app.ui.investments_view import InvestmentsView
 from app.ui.nav_icons import nav_icon
 from app.ui.payments_view import PaymentsView
 from app.ui.subscriptions_view import SubscriptionsView
+from app.events import app_events
 from app.ui.theme import THEME_DARK, THEME_LIGHT, apply_theme
 
 
@@ -57,6 +66,7 @@ class MainWindow(QMainWindow):
         self.investments = InvestmentsView()
 
         self.stack = QStackedWidget()
+        self.stack.setMinimumWidth(0)
         self.stack.addWidget(self.dashboard)
         self.stack.addWidget(self.income_sources)
         self.stack.addWidget(self.accounts_cards)
@@ -79,13 +89,87 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.stack)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([240, 980])
         self._splitter = splitter
+        splitter.setOpaqueResize(False)
+        splitter.splitterMoved.connect(self._splitter_moved_maybe_sync)
+        self._splitter_first_layout = QTimer(self)
+        self._splitter_first_layout.setSingleShot(True)
+        self._splitter_first_layout.timeout.connect(self._apply_initial_splitter_sizes)
+        self._splitter_initial_sizes_done = False
 
         self.setCentralWidget(splitter)
 
-        self._connect_data_changes()
+        self._connect_app_events()
         self._setup_theme_menu()
+
+    def _splitter_needs_sync(self) -> bool:
+        splitter = self._splitter
+        aw = splitter.width()
+        if aw <= 1:
+            return False
+        s0, s1 = splitter.sizes()
+        w0 = splitter.widget(0)
+        w1 = splitter.widget(1)
+        if abs(s0 + s1 - aw) > 1:
+            return True
+        if w0.geometry().x() < -1 or w1.geometry().x() < -1:
+            return True
+        return False
+
+    def _sync_splitter_to_available_width(self) -> None:
+        splitter = self._splitter
+        aw = splitter.width()
+        if aw <= 1:
+            return
+        w0 = splitter.widget(0)
+        w1 = splitter.widget(1)
+        min0 = max(1, w0.minimumWidth())
+        min1 = max(0, w1.minimumWidth())
+        if min0 + min1 > aw:
+            return
+        s0, s1 = splitter.sizes()
+        geo0 = w0.geometry()
+        if s0 + s1 == aw and geo0.x() >= 0 and w1.geometry().x() >= 0:
+            return
+        total = s0 + s1
+        if total <= 0:
+            target = getattr(self, "_sidebar_open_width", min0 + 40)
+            left = max(min0, min(target, aw - min1))
+        else:
+            left = int(round(aw * (s0 / total)))
+        left = max(min0, min(left, aw - min1))
+        right = aw - left
+        splitter.blockSignals(True)
+        splitter.setSizes([left, right])
+        splitter.blockSignals(False)
+
+    def _splitter_moved_maybe_sync(self, _pos: int, _index: int) -> None:
+        if self._splitter_needs_sync():
+            self._sync_splitter_to_available_width()
+
+    def _apply_initial_splitter_sizes(self) -> None:
+        splitter = self._splitter
+        aw = splitter.width()
+        if aw <= 1:
+            return
+        left = max(
+            self.sidebar.minimumWidth(),
+            min(self._sidebar_open_width, aw - 320),
+        )
+        splitter.setSizes([left, aw - left])
+        if self._splitter_needs_sync():
+            self._sync_splitter_to_available_width()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._splitter_initial_sizes_done:
+            self._splitter_initial_sizes_done = True
+            self._splitter_first_layout.start(0)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._splitter_needs_sync():
+            self._sync_splitter_to_available_width()
 
     def _nav_entries(
         self,
@@ -127,11 +211,38 @@ class MainWindow(QMainWindow):
             ),
         ]
 
+    def _sidebar_content_minimum_px(self) -> int:
+        leaf_font = QFont(self.font())
+        sec_font = QFont(leaf_font)
+        sec_font.setPointSize(10)
+        sec_font.setWeight(QFont.Weight.DemiBold)
+        title_font = QFont(leaf_font)
+        title_font.setPointSize(18)
+        title_font.setWeight(QFont.Weight.DemiBold)
+        sub_font = QFont(leaf_font)
+        sub_font.setPointSize(11)
+        mw = 0
+        for group_name, items in self._nav_entries():
+            mw = max(mw, QFontMetrics(sec_font).horizontalAdvance(group_name.upper()))
+            for label, _, _ in items:
+                mw = max(mw, QFontMetrics(leaf_font).horizontalAdvance(label))
+        for line in ("Controle", "Financeiro"):
+            mw = max(mw, QFontMetrics(title_font).horizontalAdvance(line))
+        mw = max(
+            mw,
+            QFontMetrics(sub_font).horizontalAdvance(
+                "Gestão pessoal · SQLite local"
+            ),
+        )
+        tree_slack = 88
+        return max(268, mw + tree_slack)
+
     def _build_sidebar(self) -> QWidget:
         sidebar = QWidget()
         sidebar.setObjectName("Sidebar")
-        sidebar.setMinimumWidth(168)
-        sidebar.setMaximumWidth(400)
+        content_px = self._sidebar_content_minimum_px()
+        sidebar.setMinimumWidth(content_px)
+        self._sidebar_open_width = content_px + 20
 
         title = QLabel("Controle\nFinanceiro")
         title.setObjectName("SidebarTitle")
@@ -141,7 +252,8 @@ class MainWindow(QMainWindow):
         tree = QTreeWidget()
         tree.setObjectName("SidebarTree")
         tree.setHeaderHidden(True)
-        tree.setIndentation(16)
+        tree.setIndentation(20)
+        tree.setIconSize(QSize(20, 20))
         tree.setRootIsDecorated(False)
         tree.setExpandsOnDoubleClick(False)
         tree.setAnimated(True)
@@ -157,9 +269,8 @@ class MainWindow(QMainWindow):
             hdr.setExpanded(True)
             hdr.setFirstColumnSpanned(True)
             hdr.setFont(0, header_font)
-            hdr.setForeground(0, QBrush(QColor("#9CA3AF")))
             hdr.setData(0, Qt.ItemDataRole.UserRole, None)
-            hdr.setSizeHint(0, QSize(0, 36))
+            hdr.setSizeHint(0, QSize(0, 32))
             tree.addTopLevelItem(hdr)
 
             for label, stack_idx, icon_key in items:
@@ -176,6 +287,7 @@ class MainWindow(QMainWindow):
         tree.currentItemChanged.connect(self._on_tree_nav_changed)
         tree.itemClicked.connect(self._on_tree_item_clicked)
         self._nav_tree = tree
+        self._apply_sidebar_section_muted()
 
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -184,6 +296,19 @@ class MainWindow(QMainWindow):
         layout.addWidget(subtitle)
         layout.addWidget(tree, 1)
         return sidebar
+
+    def _sidebar_section_muted_color(self) -> QColor:
+        app = QApplication.instance()
+        if app is None:
+            return QColor("#9CA3AF")
+        return app.palette().color(QPalette.ColorRole.PlaceholderText)
+
+    def _apply_sidebar_section_muted(self) -> None:
+        brush = QBrush(self._sidebar_section_muted_color())
+        for i in range(self._nav_tree.topLevelItemCount()):
+            sec = self._nav_tree.topLevelItem(i)
+            if sec.data(0, Qt.ItemDataRole.UserRole) is None:
+                sec.setForeground(0, brush)
 
     def _on_tree_item_clicked(
         self, item: QTreeWidgetItem, column: int
@@ -216,15 +341,17 @@ class MainWindow(QMainWindow):
         if hasattr(widget, "reload"):
             widget.reload()
 
-    def _connect_data_changes(self) -> None:
-        def refresh_all():
+    def _connect_app_events(self) -> None:
+        ev = app_events()
+
+        def refresh_all() -> None:
             self.dashboard.reload()
             self.history.reload()
             self.charts_view.reload()
             self.calendar_page.reload()
             self.investments.reload()
 
-        def refresh_lists():
+        def refresh_lists() -> None:
             self.payments.reload()
             self.installments.reload()
             self.subscriptions.reload()
@@ -232,26 +359,28 @@ class MainWindow(QMainWindow):
             self.card_invoices.reload()
             self.income_sources.reload()
 
-        for view in (
-            self.income_sources,
-            self.payments,
-            self.installments,
-            self.subscriptions,
-            self.fixed_expenses,
-            self.categories,
+        def on_domain_change() -> None:
+            refresh_all()
+            refresh_lists()
+
+        def on_accounts_change() -> None:
+            refresh_all()
+            refresh_lists()
+            self.accounts_cards.reload()
+
+        for sig in (
+            ev.payments_changed,
+            ev.income_changed,
+            ev.installments_changed,
+            ev.subscriptions_changed,
+            ev.fixed_changed,
+            ev.categories_changed,
+            ev.card_invoices_changed,
         ):
-            if hasattr(view, "data_changed"):
-                view.data_changed.connect(refresh_all)
-                view.data_changed.connect(refresh_lists)
+            sig.connect(on_domain_change)
 
-        self.accounts_cards.data_changed.connect(refresh_all)
-        self.accounts_cards.data_changed.connect(refresh_lists)
-        self.accounts_cards.data_changed.connect(self.accounts_cards.reload)
-
-        self.card_invoices.data_changed.connect(refresh_all)
-        self.card_invoices.data_changed.connect(refresh_lists)
-
-        self.investments.data_changed.connect(refresh_all)
+        ev.accounts_changed.connect(on_accounts_change)
+        ev.investments_changed.connect(refresh_all)
 
     def _setup_theme_menu(self) -> None:
         bar = QMenuBar(self)
@@ -283,3 +412,4 @@ class MainWindow(QMainWindow):
         theme = THEME_DARK if action is self._act_theme_dark else THEME_LIGHT
         apply_theme(app, theme)
         QSettings().setValue("ui/theme", theme)
+        self._apply_sidebar_section_muted()

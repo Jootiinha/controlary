@@ -13,6 +13,10 @@ class Account:
     saldo_atual: Optional[float] = None  # preenchido em listagens quando calculado
 
     @classmethod
+    def unknown(cls, label: str = "—") -> "Account":
+        return cls(id=None, nome=label, observacao=None, saldo_inicial=0.0, saldo_atual=None)
+
+    @classmethod
     def from_row(cls, row) -> "Account":
         keys = list(row.keys())
         saldo_ini = float(row["saldo_inicial"]) if "saldo_inicial" in keys else 0.0

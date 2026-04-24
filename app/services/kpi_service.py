@@ -1,8 +1,12 @@
 """KPIs canônicos por competência (mês YYYY-MM)."""
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
+from typing import Optional
 
+from app.database.connection import use
+from app.repositories import expense_totals_repo
 from app.services import dashboard_service, expense_totals_service, income_sources_service
 from app.utils.formatting import current_month
 
@@ -19,13 +23,20 @@ class MonthKpis:
     saldo_projetado_fim_mes: float
 
 
+def _sum_received_income_months(
+    ano_mes: str, conn: Optional[sqlite3.Connection] = None
+) -> float:
+    with use(conn) as c:
+        return expense_totals_repo.sum_received_income_months(c, ano_mes)
+
+
 def income_pending_for_month(ano_mes: str) -> float:
     """Valor de renda ainda não creditado no mês (competência)."""
     cur = current_month()
     if ano_mes == cur:
         return income_sources_service.sum_expected_receipts_rest_of_month(ano_mes)
     esp = income_sources_service.sum_for_month(ano_mes)
-    rec = income_sources_service.sum_received_for_month(ano_mes)
+    rec = _sum_received_income_months(ano_mes)
     return round(max(esp - rec, 0.0), 2)
 
 

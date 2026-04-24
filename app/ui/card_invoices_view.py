@@ -1,7 +1,7 @@
 """Faturas de cartão por competência."""
 from __future__ import annotations
 
-from PySide6.QtCore import QDate, Signal
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -129,6 +129,11 @@ class CardInvoiceEditorDialog(QDialog):
         self.btn_paid.clicked.connect(self._mark_paid)
 
         self._inv_id = inv.id if inv else None
+        if inv is not None and inv.status == "paga":
+            self.btn_save.setEnabled(False)
+            self.btn_save.setToolTip(
+                "Fatura paga: use Reabrir na lista para voltar a rascunho."
+            )
 
     def _save_only(self) -> None:
         iid = card_invoices_service.upsert(
@@ -154,14 +159,16 @@ class CardInvoiceEditorDialog(QDialog):
             self.ed_obs.toPlainText().strip() or None,
         )
         self._inv_id = iid
-        card_invoices_service.mark_paid(iid, md.conta_id(), md.pago_em())
+        try:
+            card_invoices_service.mark_paid(iid, md.conta_id(), md.pago_em())
+        except ValueError as err:
+            QMessageBox.warning(self, "Fatura", str(err))
+            return
         QMessageBox.information(self, "Fatura", "Fatura marcada como paga.")
         self.accept()
 
 
 class CardInvoicesView(CrudPage):
-    data_changed = Signal()
-
     def __init__(self) -> None:
         super().__init__(
             "Faturas de cartão",
@@ -278,5 +285,4 @@ class CardInvoicesView(CrudPage):
             return
         dlg = CardInvoiceEditorDialog(self, cid, getattr(self, "_ym", self.ano_mes()))
         if dlg.exec():
-            self.data_changed.emit()
             self.reload()

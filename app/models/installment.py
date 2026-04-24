@@ -4,6 +4,21 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+def schedule_parcel_amounts(valor_total_contrato: float, n_parcels: int) -> list[float]:
+    """Distribui o total em n parcelas com soma exata em centavos (resto nas primeiras)."""
+    n = max(int(n_parcels), 0)
+    if n <= 0:
+        return []
+    cents_total = int(round(float(valor_total_contrato) * 100))
+    base = cents_total // n
+    rem = cents_total % n
+    out: list[float] = []
+    for i in range(n):
+        c = base + (1 if i < rem else 0)
+        out.append(round(c / 100.0, 2))
+    return out
+
+
 @dataclass
 class Installment:
     id: Optional[int]
@@ -21,9 +36,17 @@ class Installment:
     account_nome: Optional[str] = None
     categoria_nome: Optional[str] = None
 
+    def _amounts_por_competencia(self) -> list[float]:
+        n = int(self.total_parcelas)
+        if n <= 0:
+            return []
+        total_contrato = round(float(self.valor_parcela) * n, 2)
+        return schedule_parcel_amounts(total_contrato, n)
+
     @property
     def valor_total(self) -> float:
-        return round(self.valor_parcela * self.total_parcelas, 2)
+        s = self._amounts_por_competencia()
+        return round(sum(s), 2) if s else 0.0
 
     @property
     def parcelas_restantes(self) -> int:
@@ -31,7 +54,11 @@ class Installment:
 
     @property
     def saldo_devedor(self) -> float:
-        return round(self.valor_parcela * self.parcelas_restantes, 2)
+        s = self._amounts_por_competencia()
+        if not s:
+            return 0.0
+        pp = min(max(int(self.parcelas_pagas), 0), len(s))
+        return round(sum(s[pp:]), 2)
 
     @property
     def meio_label(self) -> str:

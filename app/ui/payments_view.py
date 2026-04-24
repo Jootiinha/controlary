@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
-from PySide6.QtCore import QDate, Signal
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -206,8 +206,6 @@ class PaymentDialog(FormDialog):
 
 
 class PaymentsView(CrudPage):
-    data_changed = Signal()
-
     def __init__(self) -> None:
         super().__init__(
             "Lançamentos",
@@ -287,14 +285,13 @@ class PaymentsView(CrudPage):
             payments_service.create(pay)
             origem = "—"
             if pay.conta_id is not None:
-                a = accounts_service.get(pay.conta_id)
-                origem = a.nome if a else "Conta"
+                a = accounts_service.get_or_unknown(pay.conta_id, "Conta")
+                origem = a.nome
             elif pay.cartao_id is not None:
-                c = cards_service.get(pay.cartao_id)
-                origem = f"Cartão · {c.nome}" if c else "Cartão"
+                c = cards_service.get_or_unknown(pay.cartao_id, "Cartão")
+                origem = f"Cartão · {c.nome}"
             PaymentRecordedDialog(self, pay.descricao, pay.valor, origem).exec()
             self.reload()
-            self.data_changed.emit()
 
     def _edit(self) -> None:
         pid = self.selected_id()
@@ -310,14 +307,13 @@ class PaymentsView(CrudPage):
             payments_service.update(pay)
             origem = "—"
             if pay.conta_id is not None:
-                a = accounts_service.get(pay.conta_id)
-                origem = a.nome if a else "Conta"
+                a = accounts_service.get_or_unknown(pay.conta_id, "Conta")
+                origem = a.nome
             elif pay.cartao_id is not None:
-                c = cards_service.get(pay.cartao_id)
-                origem = f"Cartão · {c.nome}" if c else "Cartão"
+                c = cards_service.get_or_unknown(pay.cartao_id, "Cartão")
+                origem = f"Cartão · {c.nome}"
             PaymentRecordedDialog(self, pay.descricao, pay.valor, origem).exec()
             self.reload()
-            self.data_changed.emit()
 
     def _delete(self) -> None:
         pid = self.selected_id()
@@ -327,9 +323,9 @@ class PaymentsView(CrudPage):
         resp = QMessageBox.question(
             self,
             "Excluir pagamento",
-            "Deseja realmente excluir este pagamento?",
+            "Excluir este pagamento remove o registro; se houver débito em conta no "
+            "livro-caixa associado a ele, esse lançamento também será removido.",
         )
         if resp == QMessageBox.Yes:
             payments_service.delete(pid)
             self.reload()
-            self.data_changed.emit()

@@ -14,6 +14,17 @@ class Card:
     conta_nome: Optional[str] = None  # preenchido em JOINs
 
     @classmethod
+    def unknown(cls, label: str = "—") -> "Card":
+        return cls(
+            id=None,
+            nome=label,
+            account_id=None,
+            observacao=None,
+            dia_pagamento_fatura=10,
+            conta_nome=None,
+        )
+
+    @classmethod
     def from_row(cls, row) -> "Card":
         keys = list(row.keys())
         conta = row["conta_nome"] if "conta_nome" in keys else None

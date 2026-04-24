@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QCheckBox, QLineEdit, QMessageBox
 
 from app.models.category import Category
@@ -51,8 +50,6 @@ class CategoryDialog(FormDialog):
 
 
 class CategoriesView(CrudPage):
-    data_changed = Signal()
-
     def __init__(self) -> None:
         super().__init__(
             "Categorias",
@@ -80,7 +77,6 @@ class CategoriesView(CrudPage):
         if dlg.exec():
             categories_service.create(dlg.payload())
             self.reload()
-            self.data_changed.emit()
 
     def _edit(self) -> None:
         cid = self.selected_id()
@@ -94,7 +90,6 @@ class CategoriesView(CrudPage):
         if dlg.exec():
             categories_service.update(dlg.payload())
             self.reload()
-            self.data_changed.emit()
 
     def _delete(self) -> None:
         cid = self.selected_id()
@@ -107,4 +102,3 @@ class CategoriesView(CrudPage):
             return
         categories_service.delete(cid)
         self.reload()
-        self.data_changed.emit()

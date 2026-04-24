@@ -26,6 +26,7 @@ from app.charts import investment_evolution_overview
 from app.models.investment import Investment
 from app.services import accounts_service, investments_service
 from app.ui.categories_view import CategoryDialog
+from app.events import app_events
 from app.ui.widgets.category_picker import CategoryPicker, emit_parent_view_data_changed
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.chart_canvas import ChartCanvas
@@ -386,14 +387,12 @@ class _InvestEvo(QWidget):
 
 
 class InvestmentsView(QWidget):
-    data_changed = Signal()
-
     def __init__(self) -> None:
         super().__init__()
         self._crud = _InvestCrud()
         self._evo = _InvestEvo()
-        self._crud.data_changed.connect(self.data_changed.emit)
         self._crud.data_changed.connect(self._evo.reload_all)
+        app_events().investments_changed.connect(self._evo.reload_all)
 
         tabs = QTabWidget()
         tabs.addTab(self._crud, "Cadastro")

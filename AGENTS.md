@@ -38,17 +38,25 @@ main.py
   └─ app/database/migrations.py  (roda sempre no startup)
   └─ app/ui/main_window.py       (QMainWindow + sidebar + QStackedWidget)
        └─ app/ui/*_view.py       (uma view por página)
-            └─ app/services/*    (regras de negócio, queries agregadas)
+            └─ app/services/*    (regras de negócio, orquestração, transações)
+                 ├─ app/repositories/*  (SQL puro; sem `transaction()` interno)
+                 ├─ app/events.py        (AppEvents: sinais por domínio p/ sincronizar UI)
+                 ├─ app/utils/mes_ano.py (competência YYYY-MM como value object)
                  └─ app/models/* (dataclasses; sem lógica pesada)
-                      └─ app/database/connection.py  (sqlite3, transaction())
+                      └─ app/database/connection.py  (transaction(), use(conn))
 ```
+
+- **Unit of Work**: funções de service que escrevem no DB aceitam `conn: Optional[sqlite3.Connection] = None` e usam `with use(conn) as c:` (`use` em `connection.py`). Quem abre a transação externa passa a mesma `conn` para evitar transações aninhadas.
+- **Chaves do livro-caixa**: `app/services/ledger.py` (`LedgerKey`); `accounts_service.transaction_key_*` delegam para compatibilidade.
+- **Competência + dia**: `app/services/competencia_ledger.data_iso_no_mes(ano_mes: str | MesAno, dia)`; `app/services/_monthly_ledger.MonthlyLedgerService` (ABC) com implementações em `*months_service` e `fixed_expenses_service.set_month_status`.
 
 `app/importers/` está reservado para importadores futuros (ex.: OFX/CSV por banco).
 
 Regras:
 
 - **Views (`app/ui/*_view.py`)** chamam apenas `services/`. Nunca importe `sqlite3` nem acesse `connection` em view.
-- **Services** recebem/retornam **dataclasses** de `app/models/`; mantêm SQL e transações. Use `with transaction() as conn:`.
+- **Services** recebem/retornam **dataclasses** de `app/models/`; concentram regras, orquestração e transações (`with transaction() as conn:` ou `with use(conn) as c:`). SQL de persistência fica em **`app/repositories/*`**.
+- **Repositories** expõem funções com `sqlite3.Connection` já aberta pelo service; sem abrir `transaction()` no repo.
 - **Models** são `@dataclass` simples com `from_row` para construir a partir de `sqlite3.Row`.
 - **Formatação** (moeda, datas, mês) vive em `app/utils/formatting.py`. Nunca formate `R$` ou datas dentro de view/service — importe utilitários.
 - **Gráficos** (matplotlib) vivem em `app/charts/` como funções `plot(ax, ...)` embutidas via `ChartCanvas`.
@@ -69,7 +77,7 @@ def _migrate_cards_dia_pagamento_fatura(conn) -> None:
     )
 ```
 
-3. Atualizar a `@dataclass` do model e qualquer `INSERT/UPDATE` em `services/`.
+3. Atualizar a `@dataclass` do model e os `INSERT/UPDATE` em `repositories/` (e validações em `services/` quando aplicável).
 4. Propagar o campo para as views (form dialog + tabela) quando fizer sentido.
 
 ## Convenções de código
@@ -120,6 +128,7 @@ def _migrate_cards_dia_pagamento_fatura(conn) -> None:
 
 ## Onde encontrar
 
+- Repositórios (SQL sem transação): `app/repositories/` — ex.: `payments_repo`, `card_invoices_repo`, `installments_repo`, `subscriptions_repo`, `dashboard_repo`, `income_sources_repo`, `*_months_repo`.
 - Schema e migrações: `app/database/schema.sql`, `app/database/migrations.py`
 - Regras agregadas do dashboard: `app/services/dashboard_service.py`
 - Projeção de eventos (calendário e próximos vencimentos): `app/services/calendar_service.py`

@@ -77,7 +77,7 @@ class FixedExpensePaidDialog(QDialog):
                     break
 
         self.sp_valor = QDoubleSpinBox()
-        self.sp_valor.setRange(0.0, 500_000.0)
+        self.sp_valor.setRange(0.01, 500_000.0)
         self.sp_valor.setDecimals(2)
         self.sp_valor.setPrefix("R$ ")
         self.sp_valor.setSingleStep(50.0)

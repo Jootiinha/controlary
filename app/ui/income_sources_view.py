@@ -372,8 +372,8 @@ class _IncomeCadastroTab(CrudPage):
             "Fontes de renda",
             "Recorrentes, avulsas e parceladas. Filtre por tipo ou use a busca. "
             "O registo de dinheiro já recebido no livro-caixa faz-se na aba Recebimentos. "
-            "Avulsas e parceladas totalmente recebidas não aparecem aqui (continuam na base "
-            "de dados; use Recebimentos ou Livro-caixa para histórico).",
+            "Avulsas e parceladas totalmente recebidas ficam ocultas até marcar "
+            "«Mostrar concluídas».",
             [
                 "Nome",
                 "Tipo",
@@ -395,9 +395,12 @@ class _IncomeCadastroTab(CrudPage):
         self._filt_tipo.addItem("Avulsa", "avulsa")
         self._filt_tipo.addItem("Parcelada", "parcelada")
         self._filt_tipo.currentIndexChanged.connect(lambda: self.reload())
+        self._chk_completed = QCheckBox("Mostrar concluídas")
+        self._chk_completed.toggled.connect(lambda: self.reload())
         bar = QHBoxLayout()
         bar.addWidget(QLabel("Filtrar:"))
         bar.addWidget(self._filt_tipo)
+        bar.addWidget(self._chk_completed)
         bar.addStretch()
         wbar = QWidget()
         wbar.setLayout(bar)
@@ -454,7 +457,9 @@ class _IncomeCadastroTab(CrudPage):
         for s in income_sources_service.list_all():
             if not self._filt_ok(s):
                 continue
-            if income_sources_service.is_fully_received(s):
+            if not self._chk_completed.isChecked() and income_sources_service.is_fully_received(
+                s
+            ):
                 continue
             if s.id is not None:
                 self._by_id[s.id] = s
@@ -510,6 +515,23 @@ class _IncomeCadastroTab(CrudPage):
         if dlg.exec():
             try:
                 income_sources_service.create(dlg.payload())
+            except income_sources_service.DuplicateAvulsaIncomeError as e:
+                r = QMessageBox.question(
+                    self,
+                    "Renda avulsa duplicada",
+                    str(e) + "\n\nDeseja criar mesmo assim?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if r != QMessageBox.StandardButton.Yes:
+                    return
+                try:
+                    income_sources_service.create(
+                        dlg.payload(), allow_duplicate_avulsa=True
+                    )
+                except ValueError as err2:
+                    QMessageBox.warning(self, "Validação", str(err2))
+                    return
             except ValueError as e:
                 QMessageBox.warning(self, "Validação", str(e))
                 return
@@ -526,8 +548,78 @@ class _IncomeCadastroTab(CrudPage):
             return
         dlg = IncomeSourceDialog(self, src, allowed_tipos=("recorrente", "avulsa", "parcelada"))
         if dlg.exec():
+            payload = dlg.payload()
             try:
-                income_sources_service.update(dlg.payload())
+                income_sources_service.update(payload)
+            except income_sources_service.DuplicateAvulsaIncomeError as dup_e:
+                r0 = QMessageBox.question(
+                    self,
+                    "Renda avulsa duplicada",
+                    str(dup_e) + "\n\nDeseja salvar mesmo assim?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if r0 != QMessageBox.StandardButton.Yes:
+                    return
+                try:
+                    income_sources_service.update(
+                        payload, allow_duplicate_avulsa=True
+                    )
+                except income_sources_service.DestructiveIncomeUpdateError as e:
+                    r = QMessageBox.question(
+                        self,
+                        "Confirmar alteração",
+                        str(e) + "\n\nDeseja continuar?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    )
+                    if r != QMessageBox.StandardButton.Yes:
+                        return
+                    try:
+                        income_sources_service.update(
+                            payload,
+                            confirm_destructive_prune=True,
+                            allow_duplicate_avulsa=True,
+                        )
+                    except ValueError as err2:
+                        QMessageBox.warning(self, "Validação", str(err2))
+                        return
+                except ValueError as err2:
+                    QMessageBox.warning(self, "Validação", str(err2))
+                    return
+                self.reload()
+                self.data_changed.emit()
+                return
+            except income_sources_service.DestructiveIncomeUpdateError as e:
+                r = QMessageBox.question(
+                    self,
+                    "Confirmar alteração",
+                    str(e) + "\n\nDeseja continuar?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if r != QMessageBox.StandardButton.Yes:
+                    return
+                try:
+                    income_sources_service.update(
+                        payload, confirm_destructive_prune=True
+                    )
+                except income_sources_service.DuplicateAvulsaIncomeError as dup2:
+                    r3 = QMessageBox.question(
+                        self,
+                        "Renda avulsa duplicada",
+                        str(dup2) + "\n\nDeseja salvar mesmo assim?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No,
+                    )
+                    if r3 != QMessageBox.StandardButton.Yes:
+                        return
+                    income_sources_service.update(
+                        payload,
+                        confirm_destructive_prune=True,
+                        allow_duplicate_avulsa=True,
+                    )
+                except ValueError as err2:
+                    QMessageBox.warning(self, "Validação", str(err2))
+                    return
             except ValueError as e:
                 QMessageBox.warning(self, "Validação", str(e))
                 return
@@ -540,7 +632,10 @@ class _IncomeCadastroTab(CrudPage):
             QMessageBox.information(self, "Excluir", "Selecione uma fonte de renda.")
             return
         resp = QMessageBox.question(
-            self, "Excluir", "Excluir esta fonte de renda?"
+            self,
+            "Excluir",
+            "Excluir esta fonte de renda? Serão removidos o cadastro, as linhas em "
+            "Situação mensal e os lançamentos de renda no livro-caixa ligados a ela.",
         )
         if resp == QMessageBox.Yes:
             income_sources_service.delete(sid)
@@ -734,7 +829,13 @@ class _IncomeMonthlyControl(QWidget):
             it_n = QTableWidgetItem(s.nome)
             it_n.setTextAlignment(ReadOnlyTable.ALIGN_LEFT)
             self.tbl.setItem(i, 0, it_n)
-            it_v = QTableWidgetItem(format_currency(s.valor_mensal))
+            mr = income_months_service.get_month_record(s.id, ym)
+            v_cell = (
+                float(mr[1])
+                if mr is not None and mr[1] is not None
+                else float(s.valor_mensal)
+            )
+            it_v = QTableWidgetItem(format_currency(v_cell))
             it_v.setTextAlignment(ReadOnlyTable.ALIGN_RIGHT)
             self.tbl.setItem(i, 1, it_v)
             it_c = QTableWidgetItem(self._resolved_conta_nome(s, ym))
@@ -793,16 +894,18 @@ class _IncomeHistoryTab(QWidget):
 
 
 class IncomeSourcesView(QWidget):
-    data_changed = Signal()
-
     def __init__(self) -> None:
         super().__init__()
         self._overview = _IncomeOverviewTab()
         self._cadastro = _IncomeCadastroTab()
         self._month = _IncomeMonthlyControl()
         self._hist = _IncomeHistoryTab()
-        self._cadastro.data_changed.connect(self.data_changed.emit)
-        self._month.data_changed.connect(self.data_changed.emit)
+
+        def _on_child_change() -> None:
+            self.reload()
+
+        self._cadastro.data_changed.connect(_on_child_change)
+        self._month.data_changed.connect(_on_child_change)
         tabs = QTabWidget()
         tabs.addTab(self._month, "Recebimentos")
         tabs.addTab(self._cadastro, "Fontes")

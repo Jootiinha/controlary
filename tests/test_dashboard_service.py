@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.database.connection import transaction
-from app.services import dashboard_service
+from app.services import accounts_service, dashboard_service
 
 REF_MONTH = "2026-04"
 
@@ -14,12 +14,25 @@ def _seed_sample_data() -> None:
         conn.execute(
             "INSERT INTO accounts (nome, saldo_inicial) VALUES ('Conta A', 1000)"
         )
-        conn.execute(
+        cur = conn.execute(
             """
             INSERT INTO payments (valor, descricao, data, conta_id, forma_pagamento)
             VALUES (50.0, 'Lançamento teste', ?, 1, 'Pix')
             """,
             (f"{REF_MONTH}-15",),
+        )
+        pid = int(cur.lastrowid)
+        conn.execute(
+            """
+            INSERT INTO account_transactions (
+                account_id, data, valor, origem, transaction_key, descricao
+            ) VALUES (1, ?, -50.0, 'pagamento', ?, ?)
+            """,
+            (
+                f"{REF_MONTH}-15",
+                accounts_service.transaction_key_payment(pid),
+                "Lançamento teste",
+            ),
         )
         conn.execute(
             """
@@ -36,7 +49,7 @@ def test_load_dashboard_totals_and_breakdown(test_db_path: Path) -> None:
     assert data.mes_referencia == REF_MONTH
     assert data.total_gasto_mes == 50.0
     assert data.renda_mensal_total == 5000.0
-    assert data.previsto_mes == 50.0
+    assert data.previsto_mes == 0.0
     assert data.saldo_projetado_fim_mes == 5950.0
     assert data.margem_apos_gasto == 4950.0
     assert data.gastos_por_conta == [("Conta A", 50.0)]
@@ -84,6 +97,6 @@ def test_dashboard_kpi_assinaturas_inclui_cartao_previsto_so_conta(test_db_path:
     assert data.assinaturas_kpi_qtd == 2
     assert data.assinaturas_kpi_em_conta_qtd == 1
     assert data.assinaturas_kpi_no_cartao_qtd == 1
-    # previsto: fatura sugerida (20) + assinatura em conta (10) + avulso em conta (50)
+    # previsto: fatura sugerida (20) + assinatura em conta (10); avulso já no livro não entra de novo
     assert data.previsto_faturas == 20.0
-    assert data.previsto_mes == 80.0
+    assert data.previsto_mes == 30.0

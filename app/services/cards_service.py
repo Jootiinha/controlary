@@ -1,90 +1,69 @@
 """CRUD de cartões."""
 from __future__ import annotations
 
+import sqlite3
 from typing import List, Optional
 
-from app.database.connection import transaction
+from app.database.connection import use
+from app.events import app_events
 from app.models.card import Card
+from app.repositories import cards_repo
 
 
-def list_all() -> List[Card]:
-    with transaction() as conn:
-        rows = conn.execute(
-            """
-            SELECT c.*, a.nome AS conta_nome
-              FROM cards c
-              LEFT JOIN accounts a ON a.id = c.account_id
-             ORDER BY c.nome COLLATE NOCASE
-            """
-        ).fetchall()
+def list_all(conn: Optional[sqlite3.Connection] = None) -> List[Card]:
+    with use(conn) as c:
+        rows = cards_repo.list_all(c)
     return [Card.from_row(r) for r in rows]
 
 
-def get(card_id: int) -> Optional[Card]:
-    with transaction() as conn:
-        row = conn.execute(
-            """
-            SELECT c.*, a.nome AS conta_nome
-              FROM cards c
-              LEFT JOIN accounts a ON a.id = c.account_id
-             WHERE c.id = ?
-            """,
-            (card_id,),
-        ).fetchone()
+def get(card_id: int, conn: Optional[sqlite3.Connection] = None) -> Optional[Card]:
+    with use(conn) as c:
+        row = cards_repo.get(c, card_id)
     return Card.from_row(row) if row else None
 
 
-def create(card: Card) -> int:
-    with transaction() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO cards (nome, account_id, observacao, dia_pagamento_fatura)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                card.nome.strip(),
-                card.account_id,
-                card.observacao,
-                card.dia_pagamento_fatura,
-            ),
+def get_or_unknown(
+    card_id: Optional[int], label: str = "—", conn: Optional[sqlite3.Connection] = None
+) -> Card:
+    if card_id is None:
+        return Card.unknown(label)
+    card = get(card_id, conn=conn)
+    return card if card is not None else Card.unknown(label)
+
+
+def create(card: Card, conn: Optional[sqlite3.Connection] = None) -> int:
+    with use(conn) as c:
+        pid = cards_repo.insert(
+            c,
+            nome=card.nome.strip(),
+            account_id=card.account_id,
+            observacao=card.observacao,
+            dia_pagamento_fatura=card.dia_pagamento_fatura,
         )
-        return int(cur.lastrowid)
+    app_events().accounts_changed.emit()
+    return pid
 
 
-def update(card: Card) -> None:
+def update(card: Card, conn: Optional[sqlite3.Connection] = None) -> None:
     if card.id is None:
         raise ValueError("Cartão sem id")
-    with transaction() as conn:
-        conn.execute(
-            """
-            UPDATE cards SET nome = ?, account_id = ?, observacao = ?,
-                   dia_pagamento_fatura = ?
-             WHERE id = ?
-            """,
-            (
-                card.nome.strip(),
-                card.account_id,
-                card.observacao,
-                card.dia_pagamento_fatura,
-                card.id,
-            ),
+    with use(conn) as c:
+        cards_repo.update(
+            c,
+            card_id=int(card.id),
+            nome=card.nome.strip(),
+            account_id=card.account_id,
+            observacao=card.observacao,
+            dia_pagamento_fatura=card.dia_pagamento_fatura,
         )
+    app_events().accounts_changed.emit()
 
 
-def delete(card_id: int) -> None:
-    with transaction() as conn:
-        n = conn.execute(
-            """
-            SELECT (
-                SELECT COUNT(*) FROM installments WHERE cartao_id = ?
-            ) + (
-                SELECT COUNT(*) FROM subscriptions WHERE card_id = ?
-            ) AS n
-            """,
-            (card_id, card_id),
-        ).fetchone()
-        if n and int(n["n"] or 0) > 0:
+def delete(card_id: int, conn: Optional[sqlite3.Connection] = None) -> None:
+    with use(conn) as c:
+        if cards_repo.count_usage(c, card_id) > 0:
             raise ValueError(
                 "Este cartão está em uso em parcelamentos ou assinaturas."
             )
-        conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+        cards_repo.delete(c, card_id)
+    app_events().accounts_changed.emit()

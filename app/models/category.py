@@ -13,6 +13,16 @@ class Category:
     ativo: bool = True
 
     @classmethod
+    def unknown(cls, label: str = "—") -> "Category":
+        return cls(
+            id=None,
+            nome=label,
+            tipo_sugerido=None,
+            cor=None,
+            ativo=False,
+        )
+
+    @classmethod
     def from_row(cls, row) -> "Category":
         keys = list(row.keys())
         ativo = bool(row["ativo"]) if "ativo" in keys else True

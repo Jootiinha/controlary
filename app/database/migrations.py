@@ -296,6 +296,18 @@ def _migrate_subscriptions_category_legacy(conn) -> None:
 
 
 def _migrate_default_category_where_null(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS _schema_flags (
+            flag TEXT PRIMARY KEY
+        )
+        """
+    )
+    if conn.execute(
+        "SELECT 1 FROM _schema_flags WHERE flag = ?",
+        ("default_category_null_filled_v1",),
+    ).fetchone():
+        return
     row = conn.execute(
         "SELECT id FROM categories WHERE nome = 'Outros' COLLATE NOCASE LIMIT 1"
     ).fetchone()
@@ -310,6 +322,10 @@ def _migrate_default_category_where_null(conn) -> None:
             f"UPDATE {table} SET category_id = ? WHERE category_id IS NULL",
             (oid,),
         )
+    conn.execute(
+        "INSERT OR IGNORE INTO _schema_flags (flag) VALUES (?)",
+        ("default_category_null_filled_v1",),
+    )
 
 
 def _migrate_payments_cartao_and_category(conn) -> None:
@@ -602,11 +618,30 @@ def _migrate_investments_tables(conn) -> None:
     )
 
 
+def _migrate_coerce_non_positive_valores(conn) -> None:
+    """Garante valores > 0 alinhados ao CHECK do schema (bancos legados)."""
+    pairs = (
+        ("fixed_expenses", "valor_mensal"),
+        ("income_sources", "valor_mensal"),
+        ("payments", "valor"),
+        ("installments", "valor_parcela"),
+        ("subscriptions", "valor_mensal"),
+    )
+    for table, col in pairs:
+        cols = _table_columns(conn, table)
+        if col not in cols:
+            continue
+        conn.execute(
+            f"UPDATE {table} SET {col} = 0.01 WHERE {col} IS NULL OR {col} <= 0"
+        )
+
+
 def run_migrations() -> None:
     schema_file = Path(resource_path("app/database/schema.sql"))
     sql = schema_file.read_text(encoding="utf-8")
     with transaction() as conn:
         conn.executescript(sql)
+        _migrate_coerce_non_positive_valores(conn)
         _ensure_accounts_cards_tables(conn)
         _migrate_payments_conta_id(conn)
         _migrate_installments_cartao_id(conn)

@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS payments (
     forma_pagamento TEXT    NOT NULL,
     observacao      TEXT,
     category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-    CHECK (NOT (conta_id IS NOT NULL AND cartao_id IS NOT NULL))
+    CHECK (NOT (conta_id IS NOT NULL AND cartao_id IS NOT NULL)),
+    CHECK (valor > 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_data ON payments(data);
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS installments (
     status          TEXT    NOT NULL DEFAULT 'ativo',
     observacao      TEXT,
     category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+    CHECK (valor_parcela > 0),
     CHECK (total_parcelas > 0),
     CHECK (parcelas_pagas >= 0),
     CHECK (parcelas_pagas <= total_parcelas),
@@ -103,6 +105,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     status          TEXT    NOT NULL DEFAULT 'ativa',
     observacao      TEXT,
     category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+    CHECK (valor_mensal > 0),
     CHECK (dia_cobranca BETWEEN 1 AND 31),
     CHECK (status IN ('ativa', 'pausada', 'cancelada')),
     CHECK (NOT (account_id IS NOT NULL AND card_id IS NOT NULL))
@@ -132,7 +135,7 @@ CREATE TABLE IF NOT EXISTS fixed_expenses (
     ativo           INTEGER NOT NULL DEFAULT 1,
     category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL,
     CHECK (dia_referencia BETWEEN 1 AND 31),
-    CHECK (valor_mensal >= 0)
+    CHECK (valor_mensal > 0)
 );
 
 CREATE TABLE IF NOT EXISTS fixed_expense_months (
@@ -160,7 +163,7 @@ CREATE TABLE IF NOT EXISTS income_sources (
     total_parcelas      INTEGER,
     parcelas_recebidas  INTEGER NOT NULL DEFAULT 0,
     forma_recebimento   TEXT,
-    CHECK (valor_mensal >= 0),
+    CHECK (valor_mensal > 0),
     CHECK (dia_recebimento BETWEEN 1 AND 31),
     CHECK (tipo = 'recorrente' OR mes_referencia IS NOT NULL),
     CHECK (tipo <> 'parcelada' OR (

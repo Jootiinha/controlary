@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.database.connection import transaction
 from app.models.subscription import Subscription
 from app.services import accounts_service, subscription_months_service, subscriptions_service
@@ -76,7 +78,7 @@ def test_set_month_pago_false_remove_ledger(test_db_path: Path) -> None:
     assert _ledger_for_sub_month(sid, "2026-05") == []
 
 
-def test_set_month_pago_cartao_sem_livro_caixa(test_db_path: Path) -> None:
+def test_set_month_pago_cartao_rejeitado(test_db_path: Path) -> None:
     aid = _seed_account()
     cid = _seed_card(aid)
     sid = subscriptions_service.create(
@@ -90,12 +92,13 @@ def test_set_month_pago_cartao_sem_livro_caixa(test_db_path: Path) -> None:
             card_id=cid,
         )
     )
-    subscription_months_service.set_month_status(sid, "2026-04", True)
-    assert subscription_months_service.is_paid(sid, "2026-04")
+    with pytest.raises(ValueError):
+        subscription_months_service.set_month_status(sid, "2026-04", True)
+    assert not subscription_months_service.is_paid(sid, "2026-04")
     assert _ledger_for_sub_month(sid, "2026-04") == []
 
 
-def test_set_month_pago_pausada_sem_ledger(test_db_path: Path) -> None:
+def test_set_month_pago_pausada_rejeitado(test_db_path: Path) -> None:
     aid = _seed_account()
     sid = subscriptions_service.create(
         Subscription(
@@ -109,6 +112,7 @@ def test_set_month_pago_pausada_sem_ledger(test_db_path: Path) -> None:
             status="pausada",
         )
     )
-    subscription_months_service.set_month_status(sid, "2026-06", True)
-    assert subscription_months_service.is_paid(sid, "2026-06")
+    with pytest.raises(ValueError):
+        subscription_months_service.set_month_status(sid, "2026-06", True)
+    assert not subscription_months_service.is_paid(sid, "2026-06")
     assert _ledger_for_sub_month(sid, "2026-06") == []

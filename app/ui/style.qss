@@ -5,15 +5,21 @@
  *   --border: #E5E7EB        --text: #111827          --text-muted: #6B7280
  *   --accent: #4C8BF5        --accent-strong: #2563EB
  *   --sidebar-bg: #111827    --sidebar-text: #D1D5DB  --success: #15803d  --danger: #b91c1c
+ * Tipografia: famílias nativas (sem Inter embutido) para métricas consistentes com o SO.
  */
 
 * {
-    font-family: "Inter", "Segoe UI", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+    font-family: ".AppleSystemUIFont", "Segoe UI", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
 }
 
 QMainWindow {
     background-color: #F5F7FA;
+}
+
+QSplitter::handle:horizontal {
+    width: 1px;
+    background-color: #E5E7EB;
 }
 
 QWidget#Sidebar {
@@ -35,7 +41,8 @@ QTreeWidget#SidebarTree::branch {
     width: 0;
 }
 QTreeWidget#SidebarTree::item {
-    padding: 10px 20px 10px 24px;
+    min-height: 34px;
+    padding: 8px 16px 8px 20px;
     border-left: 3px solid transparent;
 }
 QTreeWidget#SidebarTree::item:hover {
