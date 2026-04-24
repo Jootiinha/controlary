@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from app.charts import monthly_expenses, month_compare
 from app.services import calendar_service, dashboard_service, investments_service
 from app.services.calendar_service import CalendarEvent
+from app.ui.ui_wait import wait_cursor
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.chart_canvas import ChartCanvas
 from app.ui.widgets.readonly_table import ReadOnlyTable
@@ -238,7 +239,7 @@ class DashboardView(QWidget):
         bottom_section.setMinimumHeight(620)
         bottom_col = QVBoxLayout(bottom_section)
         bottom_col.setContentsMargins(0, 0, 0, 0)
-        bottom_col.setSpacing(14)
+        bottom_col.setSpacing(16)
         bottom_col.addWidget(chart_box, 1)
         bottom_col.addWidget(tables_row, 0)
 
@@ -246,7 +247,7 @@ class DashboardView(QWidget):
         content.setObjectName("DashboardContent")
         inner = QVBoxLayout(content)
         inner.setContentsMargins(24, 24, 24, 24)
-        inner.setSpacing(14)
+        inner.setSpacing(16)
         inner.addWidget(self.lbl_title)
         inner.addWidget(self.lbl_subtitle)
         inner.addWidget(kpi_wrap, 0)
@@ -284,6 +285,10 @@ class DashboardView(QWidget):
         return wrapper
 
     def reload(self) -> None:
+        with wait_cursor():
+            self._reload_impl()
+
+    def _reload_impl(self) -> None:
         data = dashboard_service.load()
         self.lbl_subtitle.setText(f"Referência: {format_month_br(data.mes_referencia)}")
 

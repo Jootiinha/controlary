@@ -52,7 +52,7 @@ Regras:
 - **Models** são `@dataclass` simples com `from_row` para construir a partir de `sqlite3.Row`.
 - **Formatação** (moeda, datas, mês) vive em `app/utils/formatting.py`. Nunca formate `R$` ou datas dentro de view/service — importe utilitários.
 - **Gráficos** (matplotlib) vivem em `app/charts/` como funções `plot(ax, ...)` embutidas via `ChartCanvas`.
-- **Estilo Qt**: usar `app/ui/style.qss` e widgets reutilizáveis em `app/ui/widgets/` (`KpiCard`, `ChartCanvas`, `CrudPage`, `FormDialog`, `CategoryPicker`, `ReadOnlyTable`, `PaymentConfirmationDialog`, `WrappingHeader`).
+- **Estilo Qt**: `app/ui/style.qss` (claro) e `app/ui/style_dark.qss` (escuro); troca em `app/ui/theme.py` + menu **Exibir** + `QSettings` (`ui/theme`). Widgets em `app/ui/widgets/` (`KpiCard`, `ChartCanvas`, `CrudPage`, `FormDialog`, `CategoryPicker`, `ReadOnlyTable`, `PaymentConfirmationDialog`, `WrappingHeader`).
 
 ## Migrações de schema
 

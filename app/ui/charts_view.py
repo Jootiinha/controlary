@@ -21,6 +21,7 @@ from app.charts import (
     monthly_expenses,
     renda_vs_despesa,
 )
+from app.ui.ui_wait import wait_cursor
 from app.ui.widgets.chart_canvas import ChartCanvas
 
 
@@ -47,7 +48,7 @@ class ChartsView(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
         layout.addWidget(lbl_title)
         layout.addWidget(lbl_sub)
         layout.addWidget(self.tabs)
@@ -136,5 +137,6 @@ class ChartsView(QWidget):
         return wrapper
 
     def reload(self) -> None:
-        for canvas in self._canvases:
-            canvas.refresh()
+        with wait_cursor():
+            for canvas in self._canvases:
+                canvas.refresh()

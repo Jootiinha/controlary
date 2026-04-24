@@ -3,14 +3,15 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QBrush, QColor, QFont
+from PySide6.QtCore import QSettings, QSize, Qt
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QFont
 from PySide6.QtWidgets import (
+    QApplication,
     QLabel,
     QMainWindow,
+    QMenuBar,
     QSplitter,
     QStackedWidget,
-    QStyle,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -28,8 +29,10 @@ from app.ui.history_view import HistoryView
 from app.ui.income_sources_view import IncomeSourcesView
 from app.ui.installments_view import InstallmentsView
 from app.ui.investments_view import InvestmentsView
+from app.ui.nav_icons import nav_icon
 from app.ui.payments_view import PaymentsView
 from app.ui.subscriptions_view import SubscriptionsView
+from app.ui.theme import THEME_DARK, THEME_LIGHT, apply_theme
 
 
 class MainWindow(QMainWindow):
@@ -82,95 +85,44 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(splitter)
 
         self._connect_data_changes()
+        self._setup_theme_menu()
 
     def _nav_entries(
         self,
-    ) -> list[tuple[str, list[tuple[str, int, QStyle.StandardPixmap]]]]:
-        """Grupos e itens (rótulo, índice no QStackedWidget, ícone padrão Qt)."""
+    ) -> list[tuple[str, list[tuple[str, int, str]]]]:
+        """Grupos e itens (rótulo, índice no QStackedWidget, chave do ícone em nav_icons)."""
         return [
             (
                 "Visão geral",
                 [
-                    (
-                        "Dashboard",
-                        0,
-                        QStyle.StandardPixmap.SP_FileDialogDetailedView,
-                    ),
-                    (
-                        "Calendário",
-                        9,
-                        QStyle.StandardPixmap.SP_FileDialogInfoView,
-                    ),
+                    ("Dashboard", 0, "dashboard"),
+                    ("Calendário", 9, "calendar"),
                 ],
             ),
             (
                 "Movimento",
                 [
-                    (
-                        "Lançamentos",
-                        4,
-                        QStyle.StandardPixmap.SP_DialogApplyButton,
-                    ),
-                    (
-                        "Parcelamentos",
-                        5,
-                        QStyle.StandardPixmap.SP_FileDialogListView,
-                    ),
-                    (
-                        "Assinaturas",
-                        6,
-                        QStyle.StandardPixmap.SP_BrowserReload,
-                    ),
-                    (
-                        "Gastos fixos",
-                        7,
-                        QStyle.StandardPixmap.SP_DialogSaveButton,
-                    ),
-                    (
-                        "Faturas de cartão",
-                        8,
-                        QStyle.StandardPixmap.SP_FileIcon,
-                    ),
+                    ("Lançamentos", 4, "payments"),
+                    ("Parcelamentos", 5, "installments"),
+                    ("Assinaturas", 6, "subscriptions"),
+                    ("Gastos fixos", 7, "fixed_expenses"),
+                    ("Faturas de cartão", 8, "card_invoices"),
                 ],
             ),
             (
                 "Análise",
                 [
-                    (
-                        "Histórico",
-                        10,
-                        QStyle.StandardPixmap.SP_FileDialogContentsView,
-                    ),
-                    (
-                        "Gráficos e análises",
-                        11,
-                        QStyle.StandardPixmap.SP_FileDialogDetailedView,
-                    ),
-                    (
-                        "Investimentos",
-                        12,
-                        QStyle.StandardPixmap.SP_ArrowUp,
-                    ),
+                    ("Histórico", 10, "history"),
+                    ("Gráficos e análises", 11, "charts"),
+                    ("Investimentos", 12, "investments"),
                 ],
             ),
             (
                 "Cadastros",
                 [
-                    (
-                        "Contas e cartões",
-                        2,
-                        QStyle.StandardPixmap.SP_DriveHDIcon,
-                    ),
-                    (
-                        "Categorias",
-                        3,
-                        QStyle.StandardPixmap.SP_DirIcon,
-                    ),
-                    (
-                        "Renda",
-                        1,
-                        QStyle.StandardPixmap.SP_DialogYesButton,
-                    ),
+                    ("Contas e cartões", 2, "accounts"),
+                    ("Categorias", 3, "categories"),
+                    ("Renda", 1, "income"),
                 ],
             ),
         ]
@@ -210,9 +162,9 @@ class MainWindow(QMainWindow):
             hdr.setSizeHint(0, QSize(0, 36))
             tree.addTopLevelItem(hdr)
 
-            for label, stack_idx, spix in items:
+            for label, stack_idx, icon_key in items:
                 leaf = QTreeWidgetItem(hdr, [label])
-                leaf.setIcon(0, self.style().standardIcon(spix))
+                leaf.setIcon(0, nav_icon(icon_key, self.style()))
                 leaf.setData(0, Qt.ItemDataRole.UserRole, stack_idx)
                 leaf.setFlags(
                     Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
@@ -300,3 +252,34 @@ class MainWindow(QMainWindow):
         self.card_invoices.data_changed.connect(refresh_lists)
 
         self.investments.data_changed.connect(refresh_all)
+
+    def _setup_theme_menu(self) -> None:
+        bar = QMenuBar(self)
+        self.setMenuBar(bar)
+        menu = bar.addMenu("Exibir")
+
+        self._act_theme_light = QAction("Tema claro", self)
+        self._act_theme_light.setCheckable(True)
+        self._act_theme_dark = QAction("Tema escuro", self)
+        self._act_theme_dark.setCheckable(True)
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        group.addAction(self._act_theme_light)
+        group.addAction(self._act_theme_dark)
+        menu.addAction(self._act_theme_light)
+        menu.addAction(self._act_theme_dark)
+        group.triggered.connect(self._on_theme_menu)
+
+        stored = QSettings().value("ui/theme", THEME_LIGHT)
+        if stored == THEME_DARK:
+            self._act_theme_dark.setChecked(True)
+        else:
+            self._act_theme_light.setChecked(True)
+
+    def _on_theme_menu(self, action: QAction) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        theme = THEME_DARK if action is self._act_theme_dark else THEME_LIGHT
+        apply_theme(app, theme)
+        QSettings().setValue("ui/theme", theme)

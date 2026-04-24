@@ -127,10 +127,14 @@ class CrudPage(QWidget):
 
         self.btn_add = QPushButton("Adicionar")
         self.btn_add.setObjectName("PrimaryButton")
+        self.btn_add.setToolTip("Incluir um novo registro")
         self.btn_edit = QPushButton("Editar")
+        self.btn_edit.setToolTip("Alterar o registro selecionado na tabela")
         self.btn_delete = QPushButton("Excluir")
         self.btn_delete.setObjectName("DangerButton")
+        self.btn_delete.setToolTip("Remover permanentemente o registro selecionado")
         self.btn_refresh = QPushButton("Atualizar")
+        self.btn_refresh.setToolTip("Recarregar dados da tabela a partir do banco")
 
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Buscar…")
@@ -158,7 +162,7 @@ class CrudPage(QWidget):
         self.table.setModel(self._proxy)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.setAlternatingRowColors(False)
+        self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -193,7 +197,7 @@ class CrudPage(QWidget):
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 24, 24, 24)
-        outer.setSpacing(14)
+        outer.setSpacing(16)
         outer.addLayout(header_box)
         outer.addLayout(self.toolbar_layout)
         outer.addWidget(self.totals_wrap)

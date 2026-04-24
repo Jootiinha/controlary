@@ -29,6 +29,7 @@ from app.ui.categories_view import CategoryDialog
 from app.ui.widgets.category_picker import CategoryPicker, emit_parent_view_data_changed
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.chart_canvas import ChartCanvas
+from app.ui.ui_wait import wait_cursor
 from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.form_dialog import FormDialog
 from app.utils.formatting import format_currency, format_date_br
@@ -152,18 +153,19 @@ class InvestmentDialog(FormDialog):
         if self._inv is None or self._inv.id is None:
             self._lbl_gain.setText("—")
             self._lbl_gain.setObjectName("")
-            self._lbl_gain.setStyleSheet("")
+            self._lbl_gain.style().unpolish(self._lbl_gain)
+            self._lbl_gain.style().polish(self._lbl_gain)
             return
         series = investments_service.evolution_series(self._inv.id)
         if not series:
             self._lbl_gain.setText("—")
             self._lbl_gain.setObjectName("")
-            self._lbl_gain.setStyleSheet("")
+            self._lbl_gain.style().unpolish(self._lbl_gain)
+            self._lbl_gain.style().polish(self._lbl_gain)
             return
         last_v = series[-1][1]
         gain = last_v - float(self.sp_valor.value())
         self._lbl_gain.setText(format_currency(gain))
-        self._lbl_gain.setStyleSheet("")
         if gain > 0:
             self._lbl_gain.setObjectName("PositiveDelta")
         elif gain < 0:
@@ -224,6 +226,9 @@ class _InvestCrud(CrudPage):
         )
         self.btn_registrar_hoje = QPushButton("Registrar valor hoje")
         self.btn_registrar_hoje.setObjectName("PrimaryButton")
+        self.btn_registrar_hoje.setToolTip(
+            "Gravar o valor atual do investimento selecionado para a data de hoje"
+        )
         self.btn_registrar_hoje.clicked.connect(self._registrar_valor_hoje)
         idx = self.toolbar_layout.indexOf(self.btn_delete)
         self.toolbar_layout.insertWidget(idx + 1, self.btn_registrar_hoje)
@@ -399,5 +404,6 @@ class InvestmentsView(QWidget):
         lay.addWidget(tabs, 1)
 
     def reload(self) -> None:
-        self._crud.reload()
-        self._evo.reload_all()
+        with wait_cursor():
+            self._crud.reload()
+            self._evo.reload_all()

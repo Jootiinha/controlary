@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services import categories_service, payments_service
+from app.ui.ui_wait import wait_cursor
 from app.ui.widgets.readonly_table import ReadOnlyTable
 from app.utils.formatting import format_currency, format_date_br
 
@@ -30,7 +31,7 @@ class HistoryView(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
         layout.addWidget(lbl_title)
         layout.addWidget(lbl_sub)
         layout.addWidget(self.tabs)
@@ -59,6 +60,10 @@ class HistoryView(QWidget):
         return wrapper
 
     def reload(self) -> None:
+        with wait_cursor():
+            self._reload_impl()
+
+    def _reload_impl(self) -> None:
         payments = payments_service.list_all()
         rows = []
         sort_keys: list[list[object]] = []

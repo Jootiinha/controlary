@@ -19,6 +19,7 @@ else:
 datas = [
     (str(ROOT / "app" / "database" / "schema.sql"), "app/database"),
     (str(ROOT / "app" / "ui" / "style.qss"), "app/ui"),
+    (str(ROOT / "app" / "ui" / "style_dark.qss"), "app/ui"),
     (str(ROOT / "assets"), "assets"),
 ]
 

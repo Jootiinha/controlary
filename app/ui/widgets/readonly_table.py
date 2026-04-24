@@ -50,7 +50,7 @@ class ReadOnlyTable(QTableWidget):
         min_height: int | None = None,
         stretch_mode: QHeaderView.ResizeMode = QHeaderView.ResizeMode.Stretch,
         section_resize_modes: list[QHeaderView.ResizeMode] | None = None,
-        alternating_row_colors: bool = False,
+        alternating_row_colors: bool = True,
         show_grid: bool = False,
         word_wrap: bool = True,
         vertical_header_default_section_size: int | None = None,
