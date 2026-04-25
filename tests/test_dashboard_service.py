@@ -57,6 +57,42 @@ def test_load_dashboard_totals_and_breakdown(test_db_path: Path) -> None:
     assert dashboard_service.previsto_mes_for(REF_MONTH) == data.previsto_mes
 
 
+def test_total_gasto_mes_exclui_ajuste_livro_caixa(test_db_path: Path) -> None:
+    with transaction() as conn:
+        conn.execute(
+            "INSERT INTO accounts (nome, saldo_inicial) VALUES ('Conta B', 2000)"
+        )
+        cur = conn.execute(
+            """
+            INSERT INTO payments (valor, descricao, data, conta_id, forma_pagamento)
+            VALUES (30.0, 'Compra', ?, 1, 'Pix')
+            """,
+            (f"{REF_MONTH}-10",),
+        )
+        pid = int(cur.lastrowid)
+        conn.execute(
+            """
+            INSERT INTO account_transactions (
+                account_id, data, valor, origem, transaction_key, descricao
+            ) VALUES (1, ?, -30.0, 'pagamento', ?, 'Compra')
+            """,
+            (
+                f"{REF_MONTH}-10",
+                accounts_service.transaction_key_payment(pid),
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO account_transactions (
+                account_id, data, valor, origem, transaction_key, descricao
+            ) VALUES (1, ?, -200.0, 'ajuste', 'adjustment:z', 'Ajuste manual')
+            """,
+            (f"{REF_MONTH}-11",),
+        )
+    data = dashboard_service.load(mes=REF_MONTH)
+    assert data.total_gasto_mes == 30.0
+
+
 def test_load_empty_database(test_db_path: Path) -> None:
     data = dashboard_service.load(mes=REF_MONTH)
 

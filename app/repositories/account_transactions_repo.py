@@ -81,6 +81,10 @@ def sum_debits_in_month(conn: sqlite3.Connection, ano_mes: str) -> float:
           FROM account_transactions
          WHERE substr(data, 1, 7) = ?
            AND valor < 0
+           AND NOT (
+               COALESCE(origem, '') = 'ajuste'
+               OR COALESCE(transaction_key, '') LIKE 'adjustment:%'
+           )
         """,
         (ano_mes,),
     ).fetchone()

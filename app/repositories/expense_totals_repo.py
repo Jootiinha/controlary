@@ -12,7 +12,8 @@ def sum_account_debits_excl_fatura(conn: sqlite3.Connection, ano_mes: str) -> fl
           FROM account_transactions
          WHERE substr(data, 1, 7) = ?
            AND valor < 0
-           AND COALESCE(origem, '') != 'fatura'
+           AND COALESCE(origem, '') NOT IN ('fatura', 'ajuste')
+           AND COALESCE(transaction_key, '') NOT LIKE 'adjustment:%'
         """,
         (ano_mes,),
     ).fetchone()

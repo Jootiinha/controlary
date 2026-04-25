@@ -84,3 +84,28 @@ def test_total_despesa_mes_exclui_origem_fatura_no_caixa(test_db_path: Path) -> 
         )
     total = expense_totals_service.total_despesa_mes("2026-10")
     assert total == 50.0
+
+
+def test_total_despesa_mes_exclui_ajuste_no_caixa(test_db_path: Path) -> None:
+    aid = _seed_account()
+    payments_service.create(
+        Payment(
+            id=None,
+            valor=40.0,
+            descricao="Pix",
+            data="2026-11-03",
+            conta_id=aid,
+            forma_pagamento="Pix",
+        ),
+        record_ledger=True,
+    )
+    with transaction() as conn:
+        conn.execute(
+            """
+            INSERT INTO account_transactions (
+                account_id, data, valor, origem, transaction_key, descricao
+            ) VALUES (?, '2026-11-03', -500.0, 'ajuste', 'adjustment:test1', 'Conciliação')
+            """,
+            (aid,),
+        )
+    assert expense_totals_service.total_despesa_mes("2026-11") == 40.0
