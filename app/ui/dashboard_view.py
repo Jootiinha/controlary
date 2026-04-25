@@ -1,8 +1,9 @@
 """Tela inicial com indicadores agregados."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
+    QDateEdit,
     QFrame,
     QGridLayout,
     QGroupBox,
@@ -21,12 +22,7 @@ from app.ui.ui_wait import wait_cursor
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.chart_canvas import ChartCanvas
 from app.ui.widgets.readonly_table import ReadOnlyTable
-from app.utils.formatting import (
-    current_month,
-    format_currency,
-    format_date_br,
-    format_month_br,
-)
+from app.utils.formatting import current_month, format_currency, format_date_br
 
 
 _CARD_MIN_W = 168
@@ -39,8 +35,22 @@ class DashboardView(QWidget):
 
         self.lbl_title = QLabel("Dashboard")
         self.lbl_title.setObjectName("PageTitle")
-        self.lbl_subtitle = QLabel("Visão geral do mês corrente")
+        self.lbl_subtitle = QLabel(
+            "Indicadores, tabelas e gráficos para a competência escolhida"
+        )
         self.lbl_subtitle.setObjectName("PageSubtitle")
+
+        self._dt_mes = QDateEdit()
+        self._dt_mes.setDisplayFormat("MM/yyyy")
+        self._dt_mes.setCalendarPopup(True)
+        self._dt_mes.setDate(QDate.currentDate())
+        self._dt_mes.dateChanged.connect(lambda: self.reload())
+        row_mes = QHBoxLayout()
+        row_mes.addWidget(QLabel("Mês de referência:"))
+        row_mes.addWidget(self._dt_mes)
+        row_mes.addStretch()
+        self._mes_ref_row = QWidget()
+        self._mes_ref_row.setLayout(row_mes)
 
         # Linha 1 — Fluxo do mês
         self.card_renda = KpiCard(
@@ -250,6 +260,7 @@ class DashboardView(QWidget):
         inner.setSpacing(16)
         inner.addWidget(self.lbl_title)
         inner.addWidget(self.lbl_subtitle)
+        inner.addWidget(self._mes_ref_row)
         inner.addWidget(kpi_wrap, 0)
         inner.addWidget(venc_wrap, 0)
         inner.addWidget(bottom_section, 1)
@@ -273,6 +284,10 @@ class DashboardView(QWidget):
 
         self.reload()
 
+    def _ano_mes(self) -> str:
+        d = self._dt_mes.date()
+        return f"{d.year():04d}-{d.month():02d}"
+
     def _titled(self, title: str, widget: QWidget) -> QWidget:
         wrapper = QWidget()
         layout = QVBoxLayout(wrapper)
@@ -289,8 +304,8 @@ class DashboardView(QWidget):
             self._reload_impl()
 
     def _reload_impl(self) -> None:
-        data = dashboard_service.load()
-        self.lbl_subtitle.setText(f"Referência: {format_month_br(data.mes_referencia)}")
+        ym = self._ano_mes()
+        data = dashboard_service.load(mes=ym)
 
         self.card_renda.set_value(format_currency(data.renda_mensal_total))
         self.card_gasto_previsto_mes.set_value(format_currency(data.previsto_mes))
@@ -356,7 +371,13 @@ class DashboardView(QWidget):
             )
         )
 
+        self.chart_month_compare.set_renderer(
+            lambda ax, m=ym: month_compare.plot(ax, ref=m)
+        )
         self.chart_month_compare.refresh()
+        self.chart_cost_12m.set_renderer(
+            lambda ax, m=ym: monthly_expenses.plot(ax, end_ym=m)
+        )
         self.chart_cost_12m.refresh()
 
     def _fill_table(

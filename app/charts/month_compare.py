@@ -17,15 +17,15 @@ def _shift_month(ym: str, delta: int) -> str:
     return f"{y:04d}-{m:02d}"
 
 
-def plot(ax) -> None:
-    ref = current_month()
+def plot(ax, ref: str | None = None) -> None:
+    ref = ref or current_month()
     prev = _shift_month(ref, -1)
     v_cur = cost_of_living(ref)
     v_prev = cost_of_living(prev)
 
     labels = [
         f"Anterior · {format_month_br(prev)}",
-        f"Atual · {format_month_br(ref)}",
+        f"Referência · {format_month_br(ref)}",
     ]
     values = [v_prev, v_cur]
     y_pos = [0.0, 1.0]

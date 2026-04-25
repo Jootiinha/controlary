@@ -29,6 +29,11 @@ _MONTH_ABBR = (
 def _rolling_month_keys(months: int) -> tuple[list[str], str, str]:
     today = date.today()
     y, m = today.year, today.month
+    return _rolling_month_keys_from(y, m, months)
+
+
+def _rolling_month_keys_from(year: int, month: int, months: int) -> tuple[list[str], str, str]:
+    y, m = year, month
     newest_first: list[str] = []
     for _ in range(months):
         newest_first.append(f"{y:04d}-{m:02d}")
@@ -40,13 +45,22 @@ def _rolling_month_keys(months: int) -> tuple[list[str], str, str]:
     return chronological, chronological[0], chronological[-1]
 
 
+def _keys_ending_at_ym(end_ym: str, months: int) -> list[str]:
+    y, m = map(int, end_ym.split("-"))
+    chrono, _, _ = _rolling_month_keys_from(y, m, months)
+    return chrono
+
+
 def _label_ym(ym: str) -> str:
     y, mo = map(int, ym.split("-"))
     return f"{_MONTH_ABBR[mo - 1]}/{y % 100:02d}"
 
 
-def fetch_data(months: int = 6) -> Dict[str, float]:
-    keys, _, _ = _rolling_month_keys(months)
+def fetch_data(months: int = 6, end_ym: str | None = None) -> Dict[str, float]:
+    if end_ym is None:
+        keys, _, _ = _rolling_month_keys(months)
+    else:
+        keys = _keys_ending_at_ym(end_ym, months)
     ref = current_month()
     out: Dict[str, float] = {}
     for k in keys:
@@ -57,8 +71,8 @@ def fetch_data(months: int = 6) -> Dict[str, float]:
     return out
 
 
-def plot(ax) -> None:
-    data = fetch_data()
+def plot(ax, end_ym: str | None = None) -> None:
+    data = fetch_data(6, end_ym=end_ym)
     meses_keys = list(data.keys())
     valores = list(data.values())
     labels = [_label_ym(k) for k in meses_keys]
@@ -89,8 +103,9 @@ def plot(ax) -> None:
     if leg is not None:
         leg.get_frame().set_linewidth(0.8)
 
+    end_key = end_ym or current_month()
     ax.set_title(
-        "Custo de vida — últimos 6 meses (realizado / previsto)",
+        f"Custo de vida — 6 meses até {_label_ym(end_key)} (realizado / previsto)",
         fontsize=9,
         pad=6,
     )
