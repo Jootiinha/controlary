@@ -164,7 +164,7 @@ def mark_paid(
         cartao_id = int(row["cartao_id"])
         ano_mes = row["ano_mes"]
         card_invoices_repo.update_invoice_paid(
-            c, invoice_id, pago_em, conta_pagamento_id
+            c, invoice_id, pago_em, conta_pagamento_id, historico=0
         )
         inv_row = card_invoices_repo.fetch_valor_total_ano_mes(c, invoice_id)
         if (
@@ -192,6 +192,19 @@ def mark_paid(
     app_events().card_invoices_changed.emit()
 
 
+def mark_paid_historico(
+    invoice_id: int, pago_em: str, conn: Optional[sqlite3.Connection] = None
+) -> None:
+    with use(conn) as c:
+        row = card_invoices_repo.fetch_invoice_mark_paid_header(c, invoice_id)
+        if not row or row["status"] == "paga":
+            return
+        card_invoices_repo.update_invoice_paid(
+            c, invoice_id, pago_em, None, historico=1
+        )
+    app_events().card_invoices_changed.emit()
+
+
 def set_status(
     invoice_id: int, status: str, conn: Optional[sqlite3.Connection] = None
 ) -> None:
@@ -200,23 +213,25 @@ def set_status(
     with use(conn) as c:
         row = card_invoices_repo.fetch_invoice_status_cartao_ano(c, invoice_id)
         if row and row["status"] == "paga" and status != "paga":
-            accounts_service.remove_transaction_key(
-                accounts_service.transaction_key_invoice(invoice_id), conn=c
-            )
-            cartao_id = int(row["cartao_id"])
-            ano_mes = str(row["ano_mes"])
-            for r in installments_repo.list_id_mesref_total_cartao_ativo_quitado(
-                c, cartao_id
-            ):
-                if not installment_month_applies(
-                    str(r["mes_referencia"]),
-                    int(r["total_parcelas"] or 0),
-                    ano_mes,
-                ):
-                    continue
-                installments_service.increment_paid_in_connection(
-                    c, int(r["id"]), -1
+            is_hist = bool(int(row["historico"] or 0))
+            if not is_hist:
+                accounts_service.remove_transaction_key(
+                    accounts_service.transaction_key_invoice(invoice_id), conn=c
                 )
+                cartao_id = int(row["cartao_id"])
+                ano_mes = str(row["ano_mes"])
+                for r in installments_repo.list_id_mesref_total_cartao_ativo_quitado(
+                    c, cartao_id
+                ):
+                    if not installment_month_applies(
+                        str(r["mes_referencia"]),
+                        int(r["total_parcelas"] or 0),
+                        ano_mes,
+                    ):
+                        continue
+                    installments_service.increment_paid_in_connection(
+                        c, int(r["id"]), -1
+                    )
         card_invoices_repo.update_invoice_status_only(c, invoice_id, status)
     app_events().card_invoices_changed.emit()
 

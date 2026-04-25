@@ -15,11 +15,17 @@ class CardInvoice:
     conta_pagamento_id: Optional[int] = None
     observacao: Optional[str] = None
     cartao_nome: Optional[str] = None
+    historico: bool = False
 
     @classmethod
     def from_row(cls, row) -> "CardInvoice":
         keys = list(row.keys())
         cn = row["cartao_nome"] if "cartao_nome" in keys and row["cartao_nome"] else None
+        hist = (
+            bool(row["historico"])
+            if "historico" in keys and row["historico"] is not None
+            else False
+        )
         return cls(
             id=row["id"],
             cartao_id=row["cartao_id"],
@@ -32,4 +38,5 @@ class CardInvoice:
             else None,
             observacao=row["observacao"] if "observacao" in keys else None,
             cartao_nome=cn,
+            historico=hist,
         )

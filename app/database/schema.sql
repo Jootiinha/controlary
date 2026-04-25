@@ -198,6 +198,7 @@ CREATE TABLE IF NOT EXISTS card_invoices (
     pago_em             TEXT,
     conta_pagamento_id  INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
     observacao          TEXT,
+    historico             INTEGER NOT NULL DEFAULT 0,
     UNIQUE (cartao_id, ano_mes),
     CHECK (status IN ('aberta', 'fechada', 'paga'))
 );

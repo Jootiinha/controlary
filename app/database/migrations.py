@@ -352,6 +352,7 @@ def _migrate_card_invoices_table(conn) -> None:
             pago_em             TEXT,
             conta_pagamento_id  INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
             observacao          TEXT,
+            historico             INTEGER NOT NULL DEFAULT 0,
             UNIQUE (cartao_id, ano_mes),
             CHECK (status IN ('aberta', 'fechada', 'paga'))
         )
@@ -359,6 +360,15 @@ def _migrate_card_invoices_table(conn) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_card_invoices_mes ON card_invoices(ano_mes)"
+    )
+
+
+def _migrate_card_invoices_historico(conn) -> None:
+    cols = _table_columns(conn, "card_invoices")
+    if "historico" in cols:
+        return
+    conn.execute(
+        "ALTER TABLE card_invoices ADD COLUMN historico INTEGER NOT NULL DEFAULT 0"
     )
 
 
@@ -655,6 +665,7 @@ def run_migrations() -> None:
         _migrate_payments_cartao_and_category(conn)
         _migrate_default_category_where_null(conn)
         _migrate_card_invoices_table(conn)
+        _migrate_card_invoices_historico(conn)
         _migrate_investments_tables(conn)
         _migrate_accounts_saldo_e_transacoes(conn)
         _migrate_income_sources_account_id(conn)

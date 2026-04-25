@@ -193,7 +193,8 @@ def fetch_invoice_mark_paid_header(
 ) -> Optional[sqlite3.Row]:
     return conn.execute(
         """
-        SELECT cartao_id, ano_mes, status, COALESCE(valor_total, 0) AS valor_total
+        SELECT cartao_id, ano_mes, status, COALESCE(valor_total, 0) AS valor_total,
+               COALESCE(historico, 0) AS historico
           FROM card_invoices WHERE id = ?
         """,
         (invoice_id,),
@@ -205,14 +206,16 @@ def update_invoice_paid(
     invoice_id: int,
     pago_em: str,
     conta_pagamento_id: Optional[int],
+    historico: int = 0,
 ) -> None:
     conn.execute(
         """
         UPDATE card_invoices
-           SET status = 'paga', pago_em = ?, conta_pagamento_id = ?
+           SET status = 'paga', pago_em = ?, conta_pagamento_id = ?,
+               historico = ?
          WHERE id = ?
         """,
-        (pago_em, conta_pagamento_id, invoice_id),
+        (pago_em, conta_pagamento_id, historico, invoice_id),
     )
 
 
@@ -231,7 +234,10 @@ def fetch_invoice_status_cartao_ano(
     conn: sqlite3.Connection, invoice_id: int
 ) -> Optional[sqlite3.Row]:
     return conn.execute(
-        "SELECT status, cartao_id, ano_mes FROM card_invoices WHERE id = ?",
+        """
+        SELECT status, cartao_id, ano_mes, COALESCE(historico, 0) AS historico
+          FROM card_invoices WHERE id = ?
+        """,
         (invoice_id,),
     ).fetchone()
 
@@ -240,8 +246,16 @@ def update_invoice_status_only(
     conn: sqlite3.Connection, invoice_id: int, status: str
 ) -> None:
     conn.execute(
-        "UPDATE card_invoices SET status = ? WHERE id = ?",
-        (status, invoice_id),
+        """
+        UPDATE card_invoices
+           SET status = ?,
+               historico = CASE
+                   WHEN ? IN ('aberta', 'fechada') THEN 0
+                   ELSE historico
+               END
+         WHERE id = ?
+        """,
+        (status, status, invoice_id),
     )
 
 

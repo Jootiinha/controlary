@@ -58,6 +58,34 @@ class _MarkPaidDialog(QDialog):
         return int(d) if d is not None else None
 
 
+class _HistoricoDataDialog(QDialog):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Registrar fatura (histórico)")
+        self.dt = QDateEdit()
+        self.dt.setDisplayFormat("dd/MM/yyyy")
+        self.dt.setCalendarPopup(True)
+        self.dt.setDate(QDate.currentDate())
+        form = QFormLayout()
+        form.addRow("Data de referência *", self.dt)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(
+            QLabel(
+                "Apenas registro: não altera saldo em contas nem parcelas pagas."
+            )
+        )
+        lay.addWidget(btns)
+
+    def pago_em(self) -> str:
+        return self.dt.date().toString("yyyy-MM-dd")
+
+
 class CardInvoiceEditorDialog(QDialog):
     def __init__(self, parent, cartao_id: int, ano_mes: str) -> None:
         super().__init__(parent)
@@ -109,6 +137,12 @@ class CardInvoiceEditorDialog(QDialog):
             self.ed_obs.setPlainText(inv.observacao)
 
         lay = QVBoxLayout(self)
+        if inv is not None and inv.historico and inv.status == "paga":
+            self._lbl_historico = QLabel(
+                "Fatura histórica — sem impacto em saldo ou parcelas."
+            )
+            self._lbl_historico.setObjectName("FormHint")
+            lay.addWidget(self._lbl_historico)
         lay.addWidget(QLabel("Itens que compõem a fatura (somente leitura):"))
         lay.addWidget(tree)
         lay.addWidget(self.lbl_sug)
@@ -121,16 +155,21 @@ class CardInvoiceEditorDialog(QDialog):
         self.btn_save = QPushButton("Salvar rascunho")
         self.btn_save.setObjectName("PrimaryButton")
         self.btn_paid = QPushButton("Marcar como paga")
+        self.btn_historico = QPushButton("Registrar histórico")
         row.addWidget(self.btn_save)
         row.addWidget(self.btn_paid)
+        row.addWidget(self.btn_historico)
         lay.addLayout(row)
 
         self.btn_save.clicked.connect(self._save_only)
         self.btn_paid.clicked.connect(self._mark_paid)
+        self.btn_historico.clicked.connect(self._mark_historico)
 
         self._inv_id = inv.id if inv else None
         if inv is not None and inv.status == "paga":
             self.btn_save.setEnabled(False)
+            self.btn_paid.setEnabled(False)
+            self.btn_historico.setEnabled(False)
             self.btn_save.setToolTip(
                 "Fatura paga: use Reabrir na lista para voltar a rascunho."
             )
@@ -165,6 +204,28 @@ class CardInvoiceEditorDialog(QDialog):
             QMessageBox.warning(self, "Fatura", str(err))
             return
         QMessageBox.information(self, "Fatura", "Fatura marcada como paga.")
+        self.accept()
+
+    def _mark_historico(self) -> None:
+        hd = _HistoricoDataDialog(self)
+        if not hd.exec():
+            return
+        iid = card_invoices_service.upsert(
+            self._cartao_id,
+            self._ano_mes,
+            float(self.sp_valor.value()),
+            "fechada",
+            self.ed_obs.toPlainText().strip() or None,
+        )
+        self._inv_id = iid
+        try:
+            card_invoices_service.mark_paid_historico(iid, hd.pago_em())
+        except ValueError as err:
+            QMessageBox.warning(self, "Fatura", str(err))
+            return
+        QMessageBox.information(
+            self, "Fatura", "Fatura registrada no histórico (sem efeito em contas/parcelas)."
+        )
         self.accept()
 
 
@@ -222,7 +283,9 @@ class CardInvoicesView(CrudPage):
     def _refresh_kpi_cards(self) -> None:
         total_sug = sum(t[0] for t in self._by_card.values())
         total_reg = sum(t[1] for t in self._by_card.values())
-        n_pagas = sum(1 for t in self._by_card.values() if t[2] == "paga")
+        n_pagas = sum(
+            1 for t in self._by_card.values() if t[2] in ("paga", "histórico")
+        )
         n_pend = len(self._by_card) - n_pagas
         self._kp_sug.set_value(format_currency(total_sug))
         self._kp_reg.set_value(format_currency(total_reg))
@@ -244,7 +307,10 @@ class CardInvoicesView(CrudPage):
             valor_reg = float(inv.valor_total) if inv is not None else 0.0
             if inv is None or inv.valor_total <= 0:
                 valor_reg = sug
-            st = inv.status if inv is not None else "—"
+            if inv is not None and inv.historico and inv.status == "paga":
+                st = "histórico"
+            else:
+                st = inv.status if inv is not None else "—"
             self._by_card[cid] = (sug, valor_reg, st)
             d_v = card.dia_pagamento_fatura
             vence = f"Dia {d_v:02d}"
