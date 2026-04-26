@@ -222,6 +222,14 @@ def _value_at(meses: list[str], vals: list[float], ym: str) -> float:
     return 0.0
 
 
+def _y_headroom_for_value_labels(ax, *, fraction: float = 0.14) -> None:
+    y0, y1 = ax.get_ylim()
+    if y0 == y1:
+        y1 = y0 + 1.0
+    span = y1 - y0
+    ax.set_ylim(y0, y1 + span * fraction)
+
+
 def plot(ax) -> None:
     today = date.today()
     current_ym = f"{today.year:04d}-{today.month:02d}"
@@ -295,6 +303,7 @@ def plot(ax) -> None:
     ax.tick_params(axis="x", rotation=45)
     for label in ax.get_xticklabels():
         label.set_ha("right")
+    _y_headroom_for_value_labels(ax)
 
 
 def plot_by_card(ax) -> None:

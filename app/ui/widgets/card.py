@@ -144,6 +144,9 @@ class KpiCard(QFrame):
             )
             layout.addStretch(1)
 
+    def set_title(self, title: str) -> None:
+        self._title.setText(title)
+
     def set_value(self, value: str) -> None:
         self._value.setText(value)
 

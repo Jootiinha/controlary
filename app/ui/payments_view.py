@@ -1,18 +1,22 @@
 """Tela de CRUD de pagamentos."""
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import date
 from typing import Optional
 
 from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QDoubleSpinBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QWidget,
 )
 
 from app.models.payment import Payment
@@ -24,6 +28,13 @@ from app.ui.widgets.crud_page import CrudPage
 from app.ui.widgets.payment_confirmation_dialog import PaymentRecordedDialog
 from app.ui.widgets.form_dialog import FormDialog
 from app.utils.formatting import format_currency, format_date_br
+
+
+_KP_TITLE_MES = "Total do mês atual"
+_KP_TITLE_GERAL = "Total geral"
+_KP_TITLE_PERIODO = "Total no período"
+_KP_TITLE_MEDIA = "Média por lançamento"
+_KP_TITLE_QTD = "Quantidade"
 
 
 FORMAS_PAGAMENTO = [
@@ -205,6 +216,16 @@ class PaymentDialog(FormDialog):
         )
 
 
+def _first_last_day_current_month() -> tuple[date, date]:
+    today = date.today()
+    _, last_d = monthrange(today.year, today.month)
+    return today.replace(day=1), today.replace(day=last_d)
+
+
+def _qdate_to_date(qd: QDate) -> date:
+    return date(qd.year(), qd.month(), qd.day())
+
+
 class PaymentsView(CrudPage):
     def __init__(self) -> None:
         super().__init__(
@@ -214,35 +235,103 @@ class PaymentsView(CrudPage):
         )
         self._by_id: dict[int, Payment] = {}
         self.totals_wrap.setVisible(True)
-        self._kp_mes = KpiCard("Total do mês atual", "-", compact=True)
-        self._kp_geral = KpiCard("Total geral", "-", compact=True)
-        self._kp_qtd = KpiCard("Quantidade", "-", compact=True)
+        self._kp_mes = KpiCard(_KP_TITLE_MES, "-", compact=True)
+        self._kp_geral = KpiCard(_KP_TITLE_GERAL, "-", compact=True)
+        self._kp_qtd = KpiCard(_KP_TITLE_QTD, "-", compact=True)
         self.totals_bar.addWidget(self._kp_mes)
         self.totals_bar.addWidget(self._kp_geral)
         self.totals_bar.addWidget(self._kp_qtd)
+
+        d_ini, d_fim = _first_last_day_current_month()
+        self._chk_limit_date = QCheckBox("Limitar por data")
+        self._ed_date_de = QDateEdit()
+        self._ed_date_de.setDisplayFormat("dd/MM/yyyy")
+        self._ed_date_de.setCalendarPopup(True)
+        self._ed_date_de.setDate(QDate(d_ini.year, d_ini.month, d_ini.day))
+        self._ed_date_ate = QDateEdit()
+        self._ed_date_ate.setDisplayFormat("dd/MM/yyyy")
+        self._ed_date_ate.setCalendarPopup(True)
+        self._ed_date_ate.setDate(QDate(d_fim.year, d_fim.month, d_fim.day))
+        self._ed_date_de.setEnabled(False)
+        self._ed_date_ate.setEnabled(False)
+        filter_row = QWidget()
+        fl = QHBoxLayout(filter_row)
+        fl.setContentsMargins(0, 0, 0, 0)
+        fl.addWidget(self._chk_limit_date)
+        fl.addWidget(QLabel("De"))
+        fl.addWidget(self._ed_date_de)
+        fl.addWidget(QLabel("Até"))
+        fl.addWidget(self._ed_date_ate)
+        fl.addStretch()
+        self.toolbar_layout.insertWidget(4, filter_row)
+        self._chk_limit_date.stateChanged.connect(self._on_limit_date_toggled)
+        self._ed_date_de.dateChanged.connect(self._on_date_filter_changed)
+        self._ed_date_ate.dateChanged.connect(self._on_date_filter_changed)
+
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
         self.btn_delete.clicked.connect(self._delete)
         self.btn_refresh.clicked.connect(self.reload)
         self.reload()
 
+    def _on_limit_date_toggled(self, _state: int) -> None:
+        on = self._chk_limit_date.isChecked()
+        self._ed_date_de.setEnabled(on)
+        self._ed_date_ate.setEnabled(on)
+        self.reload()
+
+    def _on_date_filter_changed(self, _d: QDate) -> None:
+        if self._chk_limit_date.isChecked():
+            self.reload()
+
     def _refresh_kpi_cards(self) -> None:
-        today = date.today()
-        ym = f"{today.year:04d}-{today.month:02d}"
-        total_mes = 0.0
-        total_geral = 0.0
-        for p in self._by_id.values():
-            total_geral += p.valor
-            if p.data.startswith(ym):
-                total_mes += p.valor
-        self._kp_mes.set_value(format_currency(total_mes))
-        self._kp_geral.set_value(format_currency(total_geral))
-        self._kp_qtd.set_value(str(len(self._by_id)))
+        if self._chk_limit_date.isChecked():
+            total_periodo = sum(p.valor for p in self._by_id.values())
+            n = len(self._by_id)
+            media = total_periodo / n if n else 0.0
+            self._kp_mes.set_title(_KP_TITLE_PERIODO)
+            self._kp_mes.set_value(format_currency(total_periodo))
+            self._kp_geral.set_title(_KP_TITLE_MEDIA)
+            self._kp_geral.set_value(format_currency(media) if n else "—")
+            self._kp_qtd.set_title(_KP_TITLE_QTD)
+            self._kp_qtd.set_value(str(n))
+        else:
+            today = date.today()
+            ym = f"{today.year:04d}-{today.month:02d}"
+            total_mes = 0.0
+            total_geral = 0.0
+            for p in self._by_id.values():
+                total_geral += p.valor
+                if p.data.startswith(ym):
+                    total_mes += p.valor
+            self._kp_mes.set_title(_KP_TITLE_MES)
+            self._kp_mes.set_value(format_currency(total_mes))
+            self._kp_geral.set_title(_KP_TITLE_GERAL)
+            self._kp_geral.set_value(format_currency(total_geral))
+            self._kp_qtd.set_title(_KP_TITLE_QTD)
+            self._kp_qtd.set_value(str(len(self._by_id)))
 
     def reload(self) -> None:
+        if self._chk_limit_date.isChecked():
+            d0 = _qdate_to_date(self._ed_date_de.date())
+            d1 = _qdate_to_date(self._ed_date_ate.date())
+            if d0 > d1:
+                QMessageBox.warning(
+                    self,
+                    "Período",
+                    "A data inicial não pode ser posterior à data final.",
+                )
+                return
+
         self._by_id.clear()
-        rows = []
-        for p in payments_service.list_all():
+        rows: list[tuple[int, list[str]]] = []
+        if self._chk_limit_date.isChecked():
+            d0 = _qdate_to_date(self._ed_date_de.date())
+            d1 = _qdate_to_date(self._ed_date_ate.date())
+            payments_iter = payments_service.list_between(d0, d1)
+        else:
+            payments_iter = payments_service.list_all()
+        for p in payments_iter:
             if p.id is not None:
                 self._by_id[p.id] = p
             nome = p.conta_nome or p.cartao_nome or "—"
