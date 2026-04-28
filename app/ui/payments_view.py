@@ -25,8 +25,8 @@ from app.ui.categories_view import CategoryDialog
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.category_picker import CategoryPicker, emit_parent_view_data_changed
 from app.ui.widgets.crud_page import CrudPage
-from app.ui.widgets.payment_confirmation_dialog import PaymentRecordedDialog
 from app.ui.widgets.form_dialog import FormDialog
+from app.ui.ui_feedback import show_toast
 from app.utils.formatting import format_currency, format_date_br
 
 
@@ -51,10 +51,11 @@ FORMAS_PAGAMENTO = [
 class PaymentDialog(FormDialog):
     def __init__(self, parent=None, payment: Optional[Payment] = None) -> None:
         super().__init__(
-            "Editar pagamento" if payment else "Novo pagamento", parent
+            "Editar despesa avulsa" if payment else "Nova despesa avulsa", parent
         )
         self._payment = payment
 
+        self.add_section("Identificação")
         self.ed_descricao = QLineEdit()
         self.ed_descricao.setPlaceholderText("Ex.: Mercado, Farmácia...")
 
@@ -70,11 +71,14 @@ class PaymentDialog(FormDialog):
         self.ed_data.setDate(QDate.currentDate())
 
         self.lbl_data_hint = QLabel(
-            "Em conta: data futura aparece no calendário e em “Próximos vencimentos”; "
-            "o saldo só considera esse débito a partir dessa data."
+            "Em conta, débito no saldo a partir da data (ⓘ detalhes no campo Data)."
         )
         self.lbl_data_hint.setWordWrap(True)
         self.lbl_data_hint.setObjectName("FormHint")
+        self.ed_data.setToolTip(
+            "Em conta: data futura aparece no calendário e em compromissos próximos; "
+            "o saldo só considera esse débito a partir dessa data."
+        )
 
         self.cmb_origem = QComboBox()
         self.cmb_origem.setEditable(False)
@@ -97,10 +101,12 @@ class PaymentDialog(FormDialog):
         self.form.addRow("Valor *", self.ed_valor)
         self.form.addRow("Data *", self.ed_data)
         self.form.addRow("", self.lbl_data_hint)
+        self.add_section("Origem e categoria")
         self.form.addRow("Origem *", self.cmb_origem)
         self.form.addRow("", self.lbl_origem)
         self.form.addRow("Categoria *", self._picker_cat)
         self.form.addRow("Forma de pagamento *", self.ed_forma)
+        self.add_section("Observação")
         self.form.addRow("Observação", self.ed_obs)
 
         self.cmb_origem.currentIndexChanged.connect(lambda _: self._sync_origem())
@@ -181,7 +187,7 @@ class PaymentDialog(FormDialog):
         if self.ed_valor.value() <= 0:
             return False, "Valor deve ser maior que zero"
         if self.cmb_origem.currentData() is None:
-            return False, "Selecione conta bancária ou cartão em “Contas e cartões”"
+            return False, "Selecione conta bancária ou cartão em Contas ou Cartões"
         if self._picker_cat.current_category_id() is None:
             return False, "Selecione uma categoria"
         return True, None
@@ -229,8 +235,8 @@ def _qdate_to_date(qd: QDate) -> date:
 class PaymentsView(CrudPage):
     def __init__(self) -> None:
         super().__init__(
-            "Lançamentos",
-            "Gastos avulsos em conta ou cartão; o livro-caixa reflete débitos em conta quando aplicável.",
+            "Despesas avulsas",
+            "Gastos pontuais em conta ou cartão; o livro-caixa reflete débitos em conta quando aplicável.",
             ["Data", "Descrição", "Origem", "Categoria", "Forma", "Valor", "Observação"],
         )
         self._by_id: dict[int, Payment] = {}
@@ -264,6 +270,7 @@ class PaymentsView(CrudPage):
         fl.addWidget(self._ed_date_ate)
         fl.addStretch()
         self.toolbar_layout.insertWidget(4, filter_row)
+        self.add_filter_chips([("all", "Todos"), ("month", "Mês atual")])
         self._chk_limit_date.stateChanged.connect(self._on_limit_date_toggled)
         self._ed_date_de.dateChanged.connect(self._on_date_filter_changed)
         self._ed_date_ate.dateChanged.connect(self._on_date_filter_changed)
@@ -273,6 +280,15 @@ class PaymentsView(CrudPage):
         self.btn_delete.clicked.connect(self._delete)
         self.btn_refresh.clicked.connect(self.reload)
         self.reload()
+
+    def on_filter_chip_selected(self, chip_id: str) -> None:
+        if chip_id == "month":
+            if not self._chk_limit_date.isChecked():
+                self._chk_limit_date.setChecked(True)
+            return
+        if chip_id == "all":
+            if self._chk_limit_date.isChecked():
+                self._chk_limit_date.setChecked(False)
 
     def _on_limit_date_toggled(self, _state: int) -> None:
         on = self._chk_limit_date.isChecked()
@@ -365,7 +381,7 @@ class PaymentsView(CrudPage):
             QMessageBox.information(
                 self,
                 "Cadastre uma origem",
-                "Cadastre ao menos uma conta ou cartão em “Contas e cartões”.",
+                "Cadastre ao menos uma conta ou cartão em Contas ou Cartões.",
             )
             return
         dlg = PaymentDialog(self)
@@ -379,7 +395,9 @@ class PaymentsView(CrudPage):
             elif pay.cartao_id is not None:
                 c = cards_service.get_or_unknown(pay.cartao_id, "Cartão")
                 origem = f"Cartão · {c.nome}"
-            PaymentRecordedDialog(self, pay.descricao, pay.valor, origem).exec()
+            show_toast(
+                f"Despesa avulsa registrada: {pay.descricao} · {format_currency(pay.valor)} · {origem}"
+            )
             self.reload()
 
     def _edit(self) -> None:
@@ -401,7 +419,9 @@ class PaymentsView(CrudPage):
             elif pay.cartao_id is not None:
                 c = cards_service.get_or_unknown(pay.cartao_id, "Cartão")
                 origem = f"Cartão · {c.nome}"
-            PaymentRecordedDialog(self, pay.descricao, pay.valor, origem).exec()
+            show_toast(
+                f"Despesa avulsa atualizada: {pay.descricao} · {format_currency(pay.valor)} · {origem}"
+            )
             self.reload()
 
     def _delete(self) -> None:

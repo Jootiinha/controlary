@@ -66,6 +66,80 @@ class BalanceAdjustDialog(QDialog):
         return float(self.ed_delta.value())
 
 
+class TransferBetweenAccountsDialog(QDialog):
+    """Débito na origem e crédito no destino no livro-caixa (não é despesa)."""
+
+    def __init__(self, parent=None, preferred_from_id: Optional[int] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Transferir entre contas")
+        hint = QLabel(
+            "Registra saída na conta de origem e entrada na de destino. "
+            "Não entra como despesa nos totais do mês."
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("FormHint")
+        self.cmb_from = QComboBox()
+        self.cmb_to = QComboBox()
+        self._fill_combo(self.cmb_from)
+        self._fill_combo(self.cmb_to)
+        if preferred_from_id is not None:
+            for i in range(self.cmb_from.count()):
+                if self.cmb_from.itemData(i) == preferred_from_id:
+                    self.cmb_from.setCurrentIndex(i)
+                    break
+        self.ed_valor = QDoubleSpinBox()
+        self.ed_valor.setRange(0.01, 10_000_000.0)
+        self.ed_valor.setDecimals(2)
+        self.ed_valor.setPrefix("R$ ")
+        self.ed_valor.setSingleStep(10.0)
+        self.ed_data = QDateEdit()
+        self.ed_data.setDisplayFormat("dd/MM/yyyy")
+        self.ed_data.setCalendarPopup(True)
+        self.ed_data.setDate(QDate.currentDate())
+        self.ed_obs = QPlainTextEdit()
+        self.ed_obs.setFixedHeight(56)
+        self.ed_obs.setPlaceholderText("Opcional")
+        form = QFormLayout()
+        form.addRow("", hint)
+        form.addRow("Conta de origem *", self.cmb_from)
+        form.addRow("Conta de destino *", self.cmb_to)
+        form.addRow("Valor *", self.ed_valor)
+        form.addRow("Data *", self.ed_data)
+        form.addRow("Observação", self.ed_obs)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(btns)
+
+    def _fill_combo(self, combo: QComboBox) -> None:
+        combo.clear()
+        for a in accounts_service.list_all():
+            if a.id is not None:
+                combo.addItem(a.nome, int(a.id))
+
+    def from_account_id(self) -> Optional[int]:
+        d = self.cmb_from.currentData()
+        return int(d) if d is not None else None
+
+    def to_account_id(self) -> Optional[int]:
+        d = self.cmb_to.currentData()
+        return int(d) if d is not None else None
+
+    def valor(self) -> float:
+        return float(self.ed_valor.value())
+
+    def data_iso(self) -> str:
+        return self.ed_data.date().toString("yyyy-MM-dd")
+
+    def observacao(self) -> Optional[str]:
+        t = self.ed_obs.toPlainText().strip()
+        return t or None
+
+
 class AccountDialog(FormDialog):
     def __init__(self, parent=None, acc: Optional[Account] = None) -> None:
         super().__init__("Editar conta" if acc else "Nova conta bancária", parent)
@@ -161,7 +235,7 @@ class CardDialog(FormDialog):
         )
 
 
-class _AccountsCrud(CrudPage):
+class AccountsCrudView(CrudPage):
     data_changed = Signal()
 
     def __init__(self) -> None:
@@ -176,12 +250,19 @@ class _AccountsCrud(CrudPage):
             "Registra um ajuste manual no livro-caixa (ex.: conciliação com extrato)."
         )
         self.btn_adjust.clicked.connect(self._adjust_balance)
+        self.btn_transfer = QPushButton("Transferir entre contas…")
+        self.btn_transfer.setToolTip(
+            "Move valor da conta de origem para a de destino no livro-caixa. "
+            "Não conta como despesa nos totais mensais."
+        )
+        self.btn_transfer.clicked.connect(self._transfer_between_accounts)
         adj_row = QWidget()
         adj_lay = QHBoxLayout(adj_row)
         adj_lay.setContentsMargins(0, 0, 0, 0)
         adj_lay.addWidget(self.btn_adjust)
+        adj_lay.addWidget(self.btn_transfer)
         adj_lay.addStretch()
-        self.layout().insertWidget(2, adj_row)
+        self._main_layout.insertWidget(2, adj_row)
 
         self.totals_wrap.setVisible(True)
         self._kp_saldo = KpiCard(
@@ -196,15 +277,15 @@ class _AccountsCrud(CrudPage):
             "No cadastro",
             compact=True,
         )
-        self._kp_saldo_ini = KpiCard(
-            "Saldo inicial (soma)",
+        self._kp_ncartoes = KpiCard(
+            "Cartões cadastrados",
             "-",
-            "Soma dos saldos iniciais",
+            "No cadastro",
             compact=True,
         )
         self.totals_bar.addWidget(self._kp_saldo)
         self.totals_bar.addWidget(self._kp_ncontas)
-        self.totals_bar.addWidget(self._kp_saldo_ini)
+        self.totals_bar.addWidget(self._kp_ncartoes)
 
         self.btn_add.clicked.connect(self._add)
         self.btn_edit.clicked.connect(self._edit)
@@ -213,10 +294,9 @@ class _AccountsCrud(CrudPage):
 
     def _refresh_kpi_cards(self) -> None:
         contas = accounts_service.list_all()
-        total_ini = sum(float(a.saldo_inicial) for a in contas)
         self._kp_saldo.set_value(format_currency(accounts_service.sum_balances()))
         self._kp_ncontas.set_value(str(len(contas)))
-        self._kp_saldo_ini.set_value(format_currency(total_ini))
+        self._kp_ncartoes.set_value(str(len(cards_service.list_all())))
 
     def reload(self) -> None:
         rows = []
@@ -255,6 +335,47 @@ class _AccountsCrud(CrudPage):
             dlg.data_iso(),
             descricao="Ajuste manual",
         )
+        self.reload()
+        self.data_changed.emit()
+
+    def _transfer_between_accounts(self) -> None:
+        contas = accounts_service.list_all()
+        if len(contas) < 2:
+            QMessageBox.information(
+                self,
+                "Transferir",
+                "Cadastre ao menos duas contas para transferir entre elas.",
+            )
+            return
+        aid = self.selected_id()
+        dlg = TransferBetweenAccountsDialog(self, preferred_from_id=aid)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        fid = dlg.from_account_id()
+        tid = dlg.to_account_id()
+        if fid is None or tid is None:
+            QMessageBox.warning(self, "Transferir", "Selecione origem e destino.")
+            return
+        if fid == tid:
+            QMessageBox.warning(
+                self, "Transferir", "A conta de origem deve ser diferente da de destino."
+            )
+            return
+        v = dlg.valor()
+        if v <= 0:
+            QMessageBox.warning(self, "Transferir", "Informe um valor maior que zero.")
+            return
+        try:
+            accounts_service.post_transfer(
+                fid,
+                tid,
+                v,
+                dlg.data_iso(),
+                descricao=dlg.observacao(),
+            )
+        except ValueError as e:
+            QMessageBox.warning(self, "Transferir", str(e))
+            return
         self.reload()
         self.data_changed.emit()
 
@@ -303,7 +424,7 @@ class _AccountsCrud(CrudPage):
         self.data_changed.emit()
 
 
-class _CardsCrud(CrudPage):
+class CardsCrudView(CrudPage):
     data_changed = Signal()
 
     def __init__(self) -> None:
@@ -382,8 +503,8 @@ class AccountsCardsView(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self._acc = _AccountsCrud()
-        self._card = _CardsCrud()
+        self._acc = AccountsCrudView()
+        self._card = CardsCrudView()
         self._acc.data_changed.connect(self._card.reload)
         self._card.data_changed.connect(self._acc.reload)
 

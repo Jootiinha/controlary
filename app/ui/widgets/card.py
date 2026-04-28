@@ -73,9 +73,15 @@ class KpiCard(QFrame):
         *,
         compact: bool = False,
         compact_style: Literal["default", "tall_narrow"] = "default",
+        variant: Literal["standard", "compact", "hero"] = "standard",
+        delta_text: str | None = None,
     ) -> None:
         super().__init__()
-        self.setObjectName("KpiCardCompact" if compact else "KpiCard")
+        eff_variant = "compact" if compact else variant
+        if eff_variant == "hero":
+            self.setObjectName("HeroKpi")
+        else:
+            self.setObjectName("KpiCardCompact" if compact else "KpiCard")
         self.setFrameShape(QFrame.StyledPanel)
 
         self._title = QLabel(title)
@@ -84,9 +90,18 @@ class KpiCard(QFrame):
         self._title.setWordWrap(True)
 
         self._value = QLabel(value)
-        self._value.setObjectName("KpiValue")
+        self._value.setObjectName(
+            "HeroKpiValue" if eff_variant == "hero" else "KpiValue"
+        )
         self._value.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._value.setWordWrap(False)
+
+        self._delta: QLabel | None = None
+        if eff_variant == "hero":
+            self._delta = QLabel(delta_text or "")
+            self._delta.setObjectName("HeroKpiDelta")
+            if not (delta_text or "").strip():
+                self._delta.hide()
 
         if compact:
             self._subtitle: QLabel = _ElidedLabel(subtitle, max_lines=_KPI_SUBTITLE_MAX_LINES)
@@ -101,9 +116,22 @@ class KpiCard(QFrame):
         layout.setSpacing(2 if compact else 8)
         layout.addWidget(self._title)
         layout.addWidget(self._value)
+        if self._delta is not None:
+            layout.addWidget(self._delta)
         layout.addWidget(self._subtitle)
 
-        if compact and compact_style == "tall_narrow":
+        if eff_variant == "hero":
+            self.setMinimumHeight(120)
+            self.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Minimum,
+            )
+            self._title.setStyleSheet("font-size: 12px;")
+            layout.setStretch(0, 0)
+            layout.setStretch(1, 0)
+            layout.setStretch(2, 0)
+            layout.setStretch(3, 1)
+        elif compact and compact_style == "tall_narrow":
             self.setFixedHeight(128)
             self.setMinimumWidth(112)
             self.setSizePolicy(
@@ -152,3 +180,9 @@ class KpiCard(QFrame):
 
     def set_subtitle(self, subtitle: str) -> None:
         self._subtitle.setText(subtitle)
+
+    def set_delta(self, text: str) -> None:
+        if self._delta is not None:
+            t = (text or "").strip()
+            self._delta.setText(t)
+            self._delta.setVisible(bool(t))

@@ -168,7 +168,7 @@ class InstallmentDialog(FormDialog):
         if not self.ed_nome.text().strip():
             return False, "Nome é obrigatório"
         if self.ed_origem.currentData() is None:
-            return False, "Selecione cartão ou conta em “Contas e cartões”"
+            return False, "Selecione cartão ou conta em Contas ou Cartões"
         if self.ed_valor_parcela.value() <= 0:
             return False, "Valor da parcela deve ser maior que zero"
         if self.ed_pagas.value() > self.ed_total.value():
@@ -283,7 +283,7 @@ class _InstallmentsCrud(CrudPage):
             QMessageBox.information(
                 self,
                 "Cadastre cartão ou conta",
-                "Cadastre ao menos um cartão ou uma conta em “Contas e cartões”.",
+                "Cadastre ao menos um cartão ou uma conta em Contas ou Cartões.",
             )
             return
         dlg = InstallmentDialog(self)

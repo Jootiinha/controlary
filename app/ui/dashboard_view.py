@@ -1,6 +1,8 @@
 """Tela inicial com indicadores agregados."""
 from __future__ import annotations
 
+from datetime import date
+
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
     QDateEdit,
@@ -9,6 +11,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -18,6 +22,7 @@ from PySide6.QtWidgets import (
 from app.charts import monthly_expenses, month_compare
 from app.services import calendar_service, dashboard_service, investments_service
 from app.services.calendar_service import CalendarEvent
+from app.services.dashboard_service import DashboardData
 from app.ui.ui_wait import wait_cursor
 from app.ui.widgets.card import KpiCard
 from app.ui.widgets.chart_canvas import ChartCanvas
@@ -28,6 +33,13 @@ from app.utils.formatting import current_month, format_currency, format_date_br
 _CARD_MIN_W = 168
 _KPI_COLS = 4
 
+_VENC_TIPO_MAP = {
+    "assinatura": "Assinatura",
+    "fixo": "Gasto fixo",
+    "parcela": "Parcelamento",
+    "fatura": "Fatura cartão",
+}
+
 
 class DashboardView(QWidget):
     def __init__(self) -> None:
@@ -36,9 +48,64 @@ class DashboardView(QWidget):
         self.lbl_title = QLabel("Dashboard")
         self.lbl_title.setObjectName("PageTitle")
         self.lbl_subtitle = QLabel(
-            "Indicadores, tabelas e gráficos para a competência escolhida"
+            "Saldo, compromissos e análises do mês (detalhes abaixo podem ser recolhidos)."
         )
         self.lbl_subtitle.setObjectName("PageSubtitle")
+
+        self._attention_strip = QWidget()
+        self._attention_lay = QHBoxLayout(self._attention_strip)
+        self._attention_lay.setContentsMargins(0, 0, 0, 0)
+        self._attention_lay.setSpacing(10)
+        self._attention_strip.hide()
+
+        self._hero_saldo = KpiCard(
+            "Saldo em contas",
+            "-",
+            subtitle="Saldo inicial + movimentações até hoje",
+            variant="hero",
+            delta_text="",
+        )
+        self._hero_saldo.setToolTip(
+            "Soma dos saldos atuais de todas as contas cadastradas."
+        )
+        self.card_saldo_fim_mes = KpiCard(
+            "Saldo fim do mês (est.)",
+            "—",
+            subtitle="Mês corrente",
+            compact=True,
+        )
+        self.card_saldo_fim_mes.setToolTip(
+            "No mês corrente: saldos em conta hoje, mais renda ainda não marcada como "
+            "recebida, menos o gasto previsto (faturas em aberto, assinaturas e parcelas "
+            "em conta não pagas, fixos pendentes e lançamentos em conta sem débito no "
+            "livro-caixa). Evita dupla contagem com o que já entrou no saldo."
+        )
+
+        self._pb_renda_vs_previsto = QProgressBar()
+        self._pb_renda_vs_previsto.setRange(0, 100)
+        self._pb_renda_vs_previsto.setFormat("Gasto sobre renda (previsto): %p%%")
+        self._pb_renda_vs_previsto.setTextVisible(True)
+        self._lbl_mes_glance = QLabel("Mês em um olhar")
+        self._lbl_mes_glance.setObjectName("PageSubtitle")
+        mes_glance = QWidget()
+        mgl = QVBoxLayout(mes_glance)
+        mgl.setContentsMargins(0, 0, 0, 0)
+        mgl.setSpacing(6)
+        mgl.addWidget(self._lbl_mes_glance)
+        mgl.addWidget(self._pb_renda_vs_previsto, 1)
+
+        hero_row = QWidget()
+        hero_lay = QHBoxLayout(hero_row)
+        hero_lay.setContentsMargins(0, 0, 0, 0)
+        hero_lay.setSpacing(16)
+        hero_lay.addWidget(self._hero_saldo, 2)
+        right_col = QWidget()
+        rcl = QVBoxLayout(right_col)
+        rcl.setContentsMargins(0, 0, 0, 0)
+        rcl.setSpacing(12)
+        rcl.addWidget(self.card_saldo_fim_mes)
+        rcl.addWidget(mes_glance, 1)
+        hero_lay.addWidget(right_col, 1)
 
         self._dt_mes = QDateEdit()
         self._dt_mes.setDisplayFormat("MM/yyyy")
@@ -46,7 +113,7 @@ class DashboardView(QWidget):
         self._dt_mes.setDate(QDate.currentDate())
         self._dt_mes.dateChanged.connect(lambda: self.reload())
         row_mes = QHBoxLayout()
-        row_mes.addWidget(QLabel("Mês de referência:"))
+        row_mes.addWidget(QLabel("Competência (gráficos e tabelas detalhadas):"))
         row_mes.addWidget(self._dt_mes)
         row_mes.addStretch()
         self._mes_ref_row = QWidget()
@@ -80,23 +147,6 @@ class DashboardView(QWidget):
             compact=True,
         )
 
-        self.card_saldo_contas = KpiCard(
-            "Saldo em contas",
-            subtitle="Saldo inicial + movimentações até hoje",
-            compact=True,
-        )
-        self.card_saldo_fim_mes = KpiCard(
-            "Saldo fim do mês (est.)",
-            subtitle="Saldo em contas + renda pendente − gasto previsto (mês corrente)",
-            compact=True,
-        )
-        self.card_saldo_fim_mes.setToolTip(
-            "No mês corrente: saldos em conta hoje, mais renda ainda não marcada como "
-            "recebida, menos o gasto previsto (faturas em aberto, assinaturas e parcelas "
-            "em conta não pagas, fixos pendentes e lançamentos em conta sem débito no "
-            "livro-caixa). Evita dupla contagem com o que já entrou no saldo."
-        )
-
         flux_grid = QGridLayout()
         flux_grid.setContentsMargins(0, 0, 0, 0)
         flux_grid.setHorizontalSpacing(12)
@@ -119,12 +169,10 @@ class DashboardView(QWidget):
         comp_grid.addWidget(self.card_invest, 0, 0, 1, 1, align)
         comp_grid.addWidget(self.card_fixos_mes, 0, 1, 1, 1, align)
         comp_grid.addWidget(self.card_assinaturas, 0, 2, 1, 2, align)
-        comp_grid.addWidget(self.card_saldo_contas, 1, 0, 1, 2, align)
-        comp_grid.addWidget(self.card_saldo_fim_mes, 1, 2, 1, 2, align)
 
-        grp_fluxo = QGroupBox("Fluxo do mês")
+        grp_fluxo = QGroupBox("Fluxo e patrimônio (resumo)")
         grp_fluxo.setLayout(flux_grid)
-        grp_comp = QGroupBox("Compromissos e patrimônio")
+        grp_comp = QGroupBox("Compromissos recorrentes")
         grp_comp.setLayout(comp_grid)
 
         kpi_outer = QVBoxLayout()
@@ -140,44 +188,27 @@ class DashboardView(QWidget):
             QSizePolicy.Policy.Fixed,
         )
 
-        self.tbl_venc = ReadOnlyTable(
-            ["Data", "Tipo", "Descrição", "Valor"],
-            fixed_height=160,
+        self.tbl_compromissos = ReadOnlyTable(
+            [
+                "Data",
+                "Direção",
+                "Tipo",
+                "Descrição",
+                "Valor",
+            ],
+            min_height=200,
             size_policy=(
                 QSizePolicy.Policy.Expanding,
                 QSizePolicy.Policy.Fixed,
             ),
         )
-        self.tbl_entradas = ReadOnlyTable(
-            ["Data", "Descrição", "Valor"],
-            fixed_height=160,
-            size_policy=(
-                QSizePolicy.Policy.Expanding,
-                QSizePolicy.Policy.Fixed,
-            ),
+        comp_wrap = self._titled(
+            f"Compromissos próximos (até {calendar_service.UPCOMING_HORIZON_DAYS} dias)",
+            self.tbl_compromissos,
         )
-
-        venc_wrap = QWidget()
-        venc_wrap.setSizePolicy(
+        comp_wrap.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Fixed,
-        )
-        venc_lay = QHBoxLayout(venc_wrap)
-        venc_lay.setContentsMargins(0, 0, 0, 0)
-        venc_lay.setSpacing(14)
-        venc_lay.addWidget(
-            self._titled(
-                f"Próximos vencimentos (próx. {calendar_service.UPCOMING_HORIZON_DAYS} dias)",
-                self.tbl_venc,
-            ),
-            1,
-        )
-        venc_lay.addWidget(
-            self._titled(
-                f"Próximas entradas (próx. {calendar_service.UPCOMING_HORIZON_DAYS} dias)",
-                self.tbl_entradas,
-            ),
-            1,
         )
 
         self.chart_month_compare = ChartCanvas(
@@ -246,12 +277,21 @@ class DashboardView(QWidget):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
-        bottom_section.setMinimumHeight(620)
+        bottom_section.setMinimumHeight(400)
         bottom_col = QVBoxLayout(bottom_section)
         bottom_col.setContentsMargins(0, 0, 0, 0)
         bottom_col.setSpacing(16)
-        bottom_col.addWidget(chart_box, 1)
-        bottom_col.addWidget(tables_row, 0)
+
+        self._grp_detalhes = QGroupBox("Análises detalhadas (competência)")
+        self._grp_detalhes.setCheckable(True)
+        self._grp_detalhes.setChecked(False)
+        det_inner = QVBoxLayout(self._grp_detalhes)
+        det_inner.setContentsMargins(12, 20, 12, 12)
+        det_inner.setSpacing(14)
+        det_inner.addWidget(self._mes_ref_row)
+        det_inner.addWidget(chart_box, 1)
+        det_inner.addWidget(tables_row, 0)
+        bottom_col.addWidget(self._grp_detalhes, 1)
 
         content = QWidget()
         content.setObjectName("DashboardContent")
@@ -260,9 +300,10 @@ class DashboardView(QWidget):
         inner.setSpacing(16)
         inner.addWidget(self.lbl_title)
         inner.addWidget(self.lbl_subtitle)
-        inner.addWidget(self._mes_ref_row)
+        inner.addWidget(self._attention_strip, 0)
+        inner.addWidget(hero_row, 0)
         inner.addWidget(kpi_wrap, 0)
-        inner.addWidget(venc_wrap, 0)
+        inner.addWidget(comp_wrap, 0)
         inner.addWidget(bottom_section, 1)
 
         scroll = QScrollArea()
@@ -320,11 +361,15 @@ class DashboardView(QWidget):
         )
         self.card_margem_previsto.set_value(format_currency(data.margem_apos_previsto))
 
-        self.card_saldo_contas.set_value(format_currency(data.saldo_em_contas))
+        self._hero_saldo.set_value(format_currency(data.saldo_em_contas))
         if data.mes_referencia == current_month():
-            self.card_saldo_fim_mes.set_value(
-                format_currency(data.saldo_projetado_fim_mes)
+            proj = data.saldo_projetado_fim_mes
+            delta = proj - data.saldo_em_contas
+            sign = "+" if delta >= 0 else ""
+            self._hero_saldo.set_delta(
+                f"Projeção fim do mês: {format_currency(proj)} ({sign}{format_currency(delta)})"
             )
+            self.card_saldo_fim_mes.set_value(format_currency(data.saldo_projetado_fim_mes))
             self.card_saldo_fim_mes.setToolTip(
                 "No mês corrente: saldos em conta hoje, mais renda ainda não marcada como "
                 "recebida, menos o gasto previsto (faturas em aberto, assinaturas e parcelas "
@@ -332,11 +377,27 @@ class DashboardView(QWidget):
                 "livro-caixa). Evita dupla contagem com o que já entrou no saldo."
             )
         else:
+            self._hero_saldo.set_delta("")
             self.card_saldo_fim_mes.set_value("—")
             self.card_saldo_fim_mes.setToolTip(
                 "Projeção de saldo ao fim do mês só está disponível para o mês de referência "
                 "corrente (saldo em contas reflete a data de hoje)."
             )
+
+        if data.renda_mensal_total > 0.005:
+            pct = min(
+                100,
+                int(round(100.0 * data.previsto_mes / data.renda_mensal_total)),
+            )
+            self._pb_renda_vs_previsto.setValue(pct)
+        else:
+            self._pb_renda_vs_previsto.setValue(0)
+
+        entradas = calendar_service.upcoming_receivables(
+            calendar_service.UPCOMING_HORIZON_DAYS
+        )
+        self._refresh_attention(data.proximos_vencimentos, data)
+        self._fill_compromissos_list(data.proximos_vencimentos, entradas)
 
         self.card_invest.set_value(format_currency(data.total_investido))
         self.card_invest.set_subtitle(
@@ -364,12 +425,6 @@ class DashboardView(QWidget):
 
         self._fill_table(data.gastos_por_conta, self.tbl_contas)
         self._fill_table(data.gastos_por_forma, self.tbl_formas)
-        self._fill_vencimentos(data.proximos_vencimentos)
-        self._fill_entradas(
-            calendar_service.upcoming_receivables(
-                calendar_service.UPCOMING_HORIZON_DAYS
-            )
-        )
 
         self.chart_month_compare.set_renderer(
             lambda ax, m=ym: month_compare.plot(ax, ref=m)
@@ -379,6 +434,70 @@ class DashboardView(QWidget):
             lambda ax, m=ym: monthly_expenses.plot(ax, end_ym=m)
         )
         self.chart_cost_12m.refresh()
+
+    def _refresh_attention(
+        self, venc: list[CalendarEvent], data: DashboardData
+    ) -> None:
+        while self._attention_lay.count():
+            item = self._attention_lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        today = date.today()
+        n_over = sum(1 for ev in venc if ev.data < today and not ev.pago)
+        if n_over > 0:
+            b = QPushButton(
+                f"{n_over} compromisso(s) atrasado(s) — confira na tabela de compromissos"
+            )
+            b.setFlat(True)
+            self._attention_lay.addWidget(b)
+            self._attention_strip.show()
+        elif data.fixos_pendentes_mes > 0.005:
+            lbl = QLabel(
+                f"Fixos pendentes no mês: {format_currency(data.fixos_pendentes_mes)}"
+            )
+            lbl.setObjectName("PageSubtitle")
+            self._attention_lay.addWidget(lbl)
+            self._attention_strip.show()
+        else:
+            self._attention_strip.hide()
+
+    def _fill_compromissos_list(
+        self, venc: list[CalendarEvent], entradas: list[CalendarEvent]
+    ) -> None:
+        combined: list[tuple[CalendarEvent, str]] = []
+        for ev in venc:
+            combined.append((ev, "Saída"))
+        for ev in entradas:
+            combined.append((ev, "Entrada"))
+        combined.sort(key=lambda t: (t[0].data, t[1], t[0].titulo.casefold()))
+        tbl = self.tbl_compromissos
+        if not combined:
+            tbl.set_rows(
+                [],
+                empty_message="Nada neste período — cadastre despesas e rendas para ver o calendário.",
+            )
+            return
+        tipo_lbl = {**_VENC_TIPO_MAP, "renda": "Renda", "pagamento": "Pagamento"}
+        rows: list[list[str]] = []
+        sk: list[list[object]] = []
+        for ev, direc in combined:
+            tipo = tipo_lbl.get(ev.tipo, ev.tipo)
+            rows.append([
+                format_date_br(ev.data),
+                direc,
+                tipo,
+                ev.titulo,
+                format_currency(ev.valor),
+            ])
+            sk.append([
+                ev.data,
+                direc.casefold(),
+                str(tipo).casefold(),
+                ev.titulo.casefold(),
+                float(ev.valor),
+            ])
+        tbl.set_rows(rows, sort_keys=sk)
 
     def _fill_table(
         self, rows: list[tuple[str, float]], tbl: ReadOnlyTable
@@ -393,60 +512,3 @@ class DashboardView(QWidget):
             ],
         )
 
-    _VENC_TIPO = {
-        "assinatura": "Assinatura",
-        "fixo": "Gasto fixo",
-        "parcela": "Parcelamento",
-        "fatura": "Fatura cartão",
-    }
-
-    def _fill_vencimentos(self, rows: list[CalendarEvent]) -> None:
-        tbl = self.tbl_venc
-        if not rows:
-            tbl.set_rows(
-                [],
-                empty_row=["—", "—", "Nada a vencer neste período", "—"],
-            )
-            return
-        tbl.set_rows(
-            [
-                [
-                    format_date_br(ev.data),
-                    self._VENC_TIPO.get(ev.tipo, ev.tipo),
-                    ev.titulo,
-                    format_currency(ev.valor),
-                ]
-                for ev in rows
-            ],
-            sort_keys=[
-                [
-                    ev.data,
-                    (self._VENC_TIPO.get(ev.tipo, ev.tipo) or "").casefold(),
-                    (ev.titulo or "").casefold(),
-                    float(ev.valor),
-                ]
-                for ev in rows
-            ],
-        )
-
-    def _fill_entradas(self, rows: list[CalendarEvent]) -> None:
-        tbl = self.tbl_entradas
-        if not rows:
-            tbl.set_rows(
-                [],
-                empty_row=["—", "Nada neste período", "—"],
-            )
-            return
-        tbl.set_rows(
-            [
-                [
-                    format_date_br(ev.data),
-                    ev.titulo,
-                    format_currency(ev.valor),
-                ]
-                for ev in rows
-            ],
-            sort_keys=[
-                [ev.data, (ev.titulo or "").casefold(), float(ev.valor)] for ev in rows
-            ],
-        )

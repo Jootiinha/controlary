@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QLabel,
     QVBoxLayout,
     QWidget,
 )
@@ -42,6 +43,12 @@ class FormDialog(QDialog):
         outer.setContentsMargins(16, 16, 16, 16)
         outer.addLayout(self.form)
         outer.addWidget(self.buttons)
+
+    def add_section(self, title: str) -> None:
+        lab = QLabel(title)
+        lab.setObjectName("FormSectionTitle")
+        lab.setStyleSheet("font-weight: 600; margin-top: 8px;")
+        self.form.addRow(lab)
 
     def _on_accept(self) -> None:
         ok, err = self.validate()

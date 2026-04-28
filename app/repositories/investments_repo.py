@@ -122,6 +122,22 @@ def sum_aplicado_ativo(conn: sqlite3.Connection) -> float:
     return float(row["t"] or 0)
 
 
+def sum_aplicado_por_categoria(
+    conn: sqlite3.Connection, category_id: Optional[int]
+) -> float:
+    if category_id is None:
+        return 0.0
+    row = conn.execute(
+        """
+        SELECT COALESCE(SUM(valor_aplicado), 0) AS t
+          FROM investments
+         WHERE ativo = 1 AND category_id = ?
+        """,
+        (category_id,),
+    ).fetchone()
+    return float(row["t"] or 0)
+
+
 def delete_snapshot_on_date(
     conn: sqlite3.Connection, inv_id: int, data: str
 ) -> None:

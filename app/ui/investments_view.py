@@ -256,7 +256,7 @@ class _InvestCrud(CrudPage):
     def _add(self) -> None:
         if not accounts_service.list_all():
             QMessageBox.information(
-                self, "Contas", "Cadastre ao menos uma conta em “Contas e cartões”."
+                self, "Contas", "Cadastre ao menos uma conta em Contas ou Cartões."
             )
             return
         dlg = InvestmentDialog(self)
@@ -326,6 +326,12 @@ class _InvestEvo(QWidget):
         lbl.setObjectName("PageSubtitle")
         lbl.setWordWrap(True)
 
+        self._kp_total = KpiCard(
+            "Total investido", "—", compact=True, compact_style="tall_narrow"
+        )
+        self._kp_total.setToolTip(
+            "Soma do valor aplicado cadastrado nos investimentos ativos."
+        )
         self._kp_ganho = KpiCard(
             "Ganho total da carteira (R$)", "—", compact=True, compact_style="tall_narrow"
         )
@@ -334,6 +340,7 @@ class _InvestEvo(QWidget):
         )
         row_kpi = QHBoxLayout()
         row_kpi.setSpacing(10)
+        row_kpi.addWidget(self._kp_total, 1)
         row_kpi.addWidget(self._kp_ganho, 1)
         row_kpi.addWidget(self._kp_var, 1)
 
@@ -359,6 +366,9 @@ class _InvestEvo(QWidget):
         self._refresh_kpis()
 
     def _refresh_kpis(self) -> None:
+        self._kp_total.set_value(
+            format_currency(investments_service.total_aplicado())
+        )
         invs = investments_service.list_all()
         if not invs:
             self._kp_ganho.set_value("—")

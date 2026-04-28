@@ -19,6 +19,7 @@ _FALLBACK: dict[str, QStyle.StandardPixmap] = {
     "history": QStyle.StandardPixmap.SP_FileDialogContentsView,
     "charts": QStyle.StandardPixmap.SP_FileDialogDetailedView,
     "investments": QStyle.StandardPixmap.SP_ArrowUp,
+    "goals": QStyle.StandardPixmap.SP_FileDialogNewFolder,
     "accounts": QStyle.StandardPixmap.SP_DriveHDIcon,
     "categories": QStyle.StandardPixmap.SP_DirIcon,
     "income": QStyle.StandardPixmap.SP_DialogYesButton,

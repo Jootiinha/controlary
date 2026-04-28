@@ -11,6 +11,8 @@ from app.models.account import Account
 from app.repositories import account_transactions_repo, accounts_repo
 from app.services.ledger import LedgerKey
 
+_TRANSFER_ORIGEM = "transferencia"
+
 
 def upsert_transaction(
     account_id: int,
@@ -134,6 +136,60 @@ def post_adjustment(
     )
 
 
+def post_transfer(
+    from_account_id: int,
+    to_account_id: int,
+    valor: float,
+    data_iso: str,
+    descricao: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    if from_account_id == to_account_id:
+        raise ValueError("Origem e destino devem ser contas diferentes")
+    v = float(valor)
+    if v <= 0:
+        raise ValueError("Valor deve ser maior que zero")
+
+    def _run(c: sqlite3.Connection) -> None:
+        uid = uuid.uuid4().hex
+        row_from = accounts_repo.get(c, from_account_id)
+        row_to = accounts_repo.get(c, to_account_id)
+        if row_from is None or row_to is None:
+            raise ValueError("Conta inválida")
+        if descricao and descricao.strip():
+            desc = descricao.strip()
+        else:
+            fn = str(row_from["nome"])
+            tn = str(row_to["nome"])
+            desc = f"Transferência: {fn} → {tn}"
+        va = abs(v)
+        upsert_transaction(
+            from_account_id,
+            -va,
+            data_iso,
+            _TRANSFER_ORIGEM,
+            LedgerKey.transfer_debit(uid),
+            desc,
+            conn=c,
+        )
+        upsert_transaction(
+            to_account_id,
+            va,
+            data_iso,
+            _TRANSFER_ORIGEM,
+            LedgerKey.transfer_credit(uid),
+            desc,
+            conn=c,
+        )
+
+    if conn is not None:
+        _run(conn)
+    else:
+        with transaction() as c:
+            _run(c)
+    app_events().accounts_changed.emit()
+
+
 def list_all(conn: Optional[sqlite3.Connection] = None) -> List[Account]:
     with use(conn) as c:
         rows = accounts_repo.list_all(c)
@@ -202,6 +258,31 @@ def sum_debits_in_month(ano_mes: str, conn: Optional[sqlite3.Connection] = None)
 
     def _run(c: sqlite3.Connection) -> float:
         return round(account_transactions_repo.sum_debits_in_month(c, ano_mes), 2)
+
+    with use(conn) as c:
+        return _run(c)
+
+
+def list_ledger_rows(
+    limit: int = 500, conn: Optional[sqlite3.Connection] = None
+) -> list[dict[str, object]]:
+    """Linhas recentes do livro-caixa para exibição na UI."""
+
+    def _run(c: sqlite3.Connection) -> list[dict[str, object]]:
+        rows = account_transactions_repo.list_recent_with_account(c, limit=limit)
+        out: list[dict[str, object]] = []
+        for r in rows:
+            out.append({
+                "id": int(r["id"]),
+                "account_id": int(r["account_id"]),
+                "conta_nome": str(r["conta_nome"] or ""),
+                "data": str(r["data"] or ""),
+                "valor": float(r["valor"] or 0),
+                "origem": str(r["origem"] or ""),
+                "descricao": r["descricao"],
+                "transaction_key": str(r["transaction_key"] or ""),
+            })
+        return out
 
     with use(conn) as c:
         return _run(c)

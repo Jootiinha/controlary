@@ -266,7 +266,7 @@ class IncomeMonthReceiptDialog(FormDialog):
         if self.ed_valor.value() <= 0:
             return False, "Valor deve ser maior que zero"
         if self.cmb_conta.count() == 0:
-            return False, "Cadastre uma conta em Contas e cartões"
+            return False, "Cadastre uma conta em Contas ou Cartões"
         if self.cmb_conta.currentData() is None:
             return False, "Selecione a conta de recebimento"
         return True, None

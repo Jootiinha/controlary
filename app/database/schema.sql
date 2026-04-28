@@ -230,3 +230,15 @@ CREATE TABLE IF NOT EXISTS investment_snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_investment_snapshots_data ON investment_snapshots(data);
+
+CREATE TABLE IF NOT EXISTS investment_goals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome         TEXT    NOT NULL,
+    valor_alvo   REAL    NOT NULL,
+    category_id  INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+    data_alvo    TEXT,
+    observacao   TEXT,
+    ativo        INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_investment_goals_category ON investment_goals(category_id);

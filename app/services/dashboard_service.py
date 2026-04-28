@@ -214,15 +214,19 @@ def load(
 
     bd = previsto_breakdown_for(mes, conn=conn)
     data.previsto_faturas = round(bd.previsto_faturas, 2)
-    data.parcelas_mes_atual = bd.parcelas_conta_mes
-    data.fixos_pendentes_mes = bd.fixos_pendentes_mes
+    data.parcelas_mes_atual = round(bd.parcelas_conta_mes, 2)
+    data.fixos_pendentes_mes = round(bd.fixos_pendentes_mes, 2)
     data.gastos_avulsos_mes = round(bd.gastos_avulsos_mes, 2)
-    data.assinaturas_ativas_valor = bd.assinaturas_conta_valor
+    data.assinaturas_ativas_valor = round(bd.assinaturas_conta_valor, 2)
     data.previsto_mes = bd.total()
 
     data.renda_mensal_total = income_sources_service.sum_for_month(mes)
-    data.margem_apos_previsto = data.renda_mensal_total - data.previsto_mes
-    data.margem_apos_gasto = data.renda_mensal_total - data.total_gasto_mes
+    data.margem_apos_previsto = round(
+        data.renda_mensal_total - data.previsto_mes, 2
+    )
+    data.margem_apos_gasto = round(
+        data.renda_mensal_total - data.total_gasto_mes, 2
+    )
 
     with use(conn) as c:
         rows = dashboard_repo.gastos_por_conta_rows(c, mes)

@@ -1,7 +1,10 @@
 """Janela principal com sidebar de navegação."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Optional
+
+from functools import partial
 
 from PySide6.QtCore import QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import (
@@ -11,7 +14,9 @@ from PySide6.QtGui import (
     QColor,
     QFont,
     QFontMetrics,
+    QKeySequence,
     QPalette,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -20,31 +25,41 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QSplitter,
     QStackedWidget,
+    QToolBar,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from app.ui.accounts_cards_view import AccountsCardsView
-from app.ui.calendar_view import CalendarView
-from app.ui.card_invoices_view import CardInvoicesView
-from app.ui.categories_view import CategoriesView
-from app.ui.charts_view import ChartsView
-from app.ui.dashboard_view import DashboardView
-from app.ui.fixed_expenses_view import FixedExpensesView
-from app.ui.history_view import HistoryView
-from app.ui.income_sources_view import IncomeSourcesView
-from app.ui.installments_view import InstallmentsView
-from app.ui.investments_view import InvestmentsView
-from app.ui.nav_icons import nav_icon
-from app.ui.payments_view import PaymentsView
-from app.ui.subscriptions_view import SubscriptionsView
 from app.events import app_events
+from app.ui.categories_view import CategoriesView
+from app.ui.dashboard_view import DashboardView
+from app.ui.income_sources_view import IncomeSourcesView
+from app.ui.nav_icons import nav_icon
+from app.ui.sections.analises_section import AnalisesSection
+from app.ui.sections.cartoes_section import CartoesSection
+from app.ui.sections.contas_section import ContasSection
+from app.ui.sections.despesas_section import DespesasSection
+from app.ui.sections.investimentos_section import InvestimentosSection
 from app.ui.theme import THEME_DARK, THEME_LIGHT, apply_theme
+from app.ui.ui_feedback import register_toast_handler
+from app.ui.widgets.command_palette import CommandPaletteDialog
+from app.ui.widgets.nova_despesa_wizard import open_nova_despesa_flow
+from app.ui.widgets.toast import Toast
 
 
 class MainWindow(QMainWindow):
+    IDX_DASHBOARD = 0
+    IDX_DESPESAS = 1
+    IDX_RECEITAS = 2
+    IDX_CARTOES = 3
+    IDX_CONTAS = 4
+    IDX_INVEST = 5
+    IDX_ANALISES = 6
+    IDX_CATEGORIES = 7
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Controle Financeiro")
@@ -52,55 +67,140 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(960, 680)
 
         self.dashboard = DashboardView()
+        self.section_despesas = DespesasSection()
         self.income_sources = IncomeSourcesView()
-        self.accounts_cards = AccountsCardsView()
+        self.section_cartoes = CartoesSection()
+        self.section_contas = ContasSection()
+        self.section_invest = InvestimentosSection()
+        self.section_analises = AnalisesSection()
         self.categories = CategoriesView()
-        self.payments = PaymentsView()
-        self.installments = InstallmentsView()
-        self.subscriptions = SubscriptionsView()
-        self.fixed_expenses = FixedExpensesView()
-        self.card_invoices = CardInvoicesView()
-        self.calendar_page = CalendarView()
-        self.history = HistoryView()
-        self.charts_view = ChartsView()
-        self.investments = InvestmentsView()
 
         self.stack = QStackedWidget()
         self.stack.setMinimumWidth(0)
         self.stack.addWidget(self.dashboard)
+        self.stack.addWidget(self.section_despesas)
         self.stack.addWidget(self.income_sources)
-        self.stack.addWidget(self.accounts_cards)
+        self.stack.addWidget(self.section_cartoes)
+        self.stack.addWidget(self.section_contas)
+        self.stack.addWidget(self.section_invest)
+        self.stack.addWidget(self.section_analises)
         self.stack.addWidget(self.categories)
-        self.stack.addWidget(self.payments)
-        self.stack.addWidget(self.installments)
-        self.stack.addWidget(self.subscriptions)
-        self.stack.addWidget(self.fixed_expenses)
-        self.stack.addWidget(self.card_invoices)
-        self.stack.addWidget(self.calendar_page)
-        self.stack.addWidget(self.history)
-        self.stack.addWidget(self.charts_view)
-        self.stack.addWidget(self.investments)
 
+        self._nav_index_to_item: dict[int, QTreeWidgetItem] = {}
+        self._sidebar_collapsed = False
         self.sidebar = self._build_sidebar()
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        splitter.addWidget(self.sidebar)
-        splitter.addWidget(self.stack)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        self._splitter = splitter
-        splitter.setOpaqueResize(False)
-        splitter.splitterMoved.connect(self._splitter_moved_maybe_sync)
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.setChildrenCollapsible(False)
+        self._splitter.addWidget(self.sidebar)
+        self._splitter.addWidget(self.stack)
+        self._splitter.setStretchFactor(0, 0)
+        self._splitter.setStretchFactor(1, 1)
+        self._splitter.setOpaqueResize(False)
+        self._splitter.splitterMoved.connect(self._splitter_moved_maybe_sync)
         self._splitter_first_layout = QTimer(self)
         self._splitter_first_layout.setSingleShot(True)
         self._splitter_first_layout.timeout.connect(self._apply_initial_splitter_sizes)
         self._splitter_initial_sizes_done = False
 
-        self.setCentralWidget(splitter)
+        central = QWidget()
+        central_lay = QVBoxLayout(central)
+        central_lay.setContentsMargins(0, 0, 0, 0)
+        central_lay.setSpacing(0)
+        self._toolbar = QToolBar()
+        self._toolbar.setObjectName("MainToolBar")
+        self._toolbar.setMovable(False)
+        act_nova = self._toolbar.addAction("+ Nova despesa")
+        act_nova.triggered.connect(self._nova_despesa)
+        act_nova.setToolTip("Registrar despesa avulsa, parcelada, assinatura ou fixa (Ctrl+N)")
+        central_lay.addWidget(self._toolbar)
+        central_lay.addWidget(self._splitter, 1)
+        self.setCentralWidget(central)
 
         self._connect_app_events()
-        self._setup_theme_menu()
+        self._setup_menus()
+        self._setup_shortcuts()
+        register_toast_handler(self._toast_dispatch)
+
+    def _toast_dispatch(
+        self,
+        message: str,
+        action_label: str | None,
+        on_action: Callable[[], None] | None,
+    ) -> None:
+        self.show_toast(message, action_label=action_label, on_action=on_action)
+
+    def show_toast(
+        self,
+        message: str,
+        *,
+        action_label: str | None = None,
+        on_action: Callable[[], None] | None = None,
+    ) -> None:
+        t = Toast(
+            self.stack,
+            message,
+            action_label=action_label,
+            on_action=on_action,
+        )
+        t.adjustSize()
+        self._position_toast(t)
+        t.show()
+        t.raise_()
+
+    def _position_toast(self, t: Toast) -> None:
+        m = 16
+        x = max(m, self.stack.width() - t.width() - m)
+        y = max(m, self.stack.height() - t.height() - m)
+        t.move(x, y)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._splitter_needs_sync():
+            self._sync_splitter_to_available_width()
+        for ch in self.stack.findChildren(Toast):
+            self._position_toast(ch)
+
+    def _nova_despesa(self) -> None:
+        open_nova_despesa_flow(self, show_toast=lambda m: self.show_toast(m))
+
+    def _command_palette(self) -> None:
+        acts: list[tuple[str, str, Callable[[], None]]] = [
+            ("dash", "Ir para Início", lambda: self._goto_page(self.IDX_DASHBOARD)),
+            ("desp", "Ir para Despesas", lambda: self._goto_page(self.IDX_DESPESAS)),
+            ("rec", "Ir para Receitas", lambda: self._goto_page(self.IDX_RECEITAS)),
+            ("cart", "Ir para Cartões", lambda: self._goto_page(self.IDX_CARTOES)),
+            ("cont", "Ir para Contas", lambda: self._goto_page(self.IDX_CONTAS)),
+            ("inv", "Ir para Investimentos", lambda: self._goto_page(self.IDX_INVEST)),
+            ("ana", "Ir para Análises", lambda: self._goto_page(self.IDX_ANALISES)),
+            ("cat", "Abrir Categorias", self._open_categories_page),
+            ("nova", "Nova despesa…", self._nova_despesa),
+        ]
+        CommandPaletteDialog(self, acts).exec()
+
+    def _open_categories_page(self) -> None:
+        self._goto_page(self.IDX_CATEGORIES)
+
+    def _goto_page(self, idx: int) -> None:
+        self.stack.setCurrentIndex(idx)
+        w = self.stack.currentWidget()
+        if hasattr(w, "reload"):
+            w.reload()
+        it = self._nav_index_to_item.get(idx)
+        if it is not None and hasattr(self, "_nav_tree"):
+            self._nav_tree.blockSignals(True)
+            self._nav_tree.setCurrentItem(it)
+            self._nav_tree.blockSignals(False)
+
+    def _setup_shortcuts(self) -> None:
+        QShortcut(QKeySequence.StandardKey.New, self, self._nova_despesa)
+        QShortcut(QKeySequence("Ctrl+K"), self, self._command_palette)
+        for n in range(1, 8):
+            QShortcut(
+                QKeySequence(f"Ctrl+{n}"),
+                self,
+                partial(self._goto_page, n - 1),
+            )
 
     def _splitter_needs_sync(self) -> bool:
         splitter = self._splitter
@@ -166,47 +266,20 @@ class MainWindow(QMainWindow):
             self._splitter_initial_sizes_done = True
             self._splitter_first_layout.start(0)
 
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        if self._splitter_needs_sync():
-            self._sync_splitter_to_available_width()
-
     def _nav_entries(
         self,
     ) -> list[tuple[str, list[tuple[str, int, str]]]]:
-        """Grupos e itens (rótulo, índice no QStackedWidget, chave do ícone em nav_icons)."""
         return [
             (
-                "Visão geral",
+                "Principal",
                 [
-                    ("Dashboard", 0, "dashboard"),
-                    ("Calendário", 9, "calendar"),
-                ],
-            ),
-            (
-                "Movimento",
-                [
-                    ("Lançamentos", 4, "payments"),
-                    ("Parcelamentos", 5, "installments"),
-                    ("Assinaturas", 6, "subscriptions"),
-                    ("Gastos fixos", 7, "fixed_expenses"),
-                    ("Faturas de cartão", 8, "card_invoices"),
-                ],
-            ),
-            (
-                "Análise",
-                [
-                    ("Histórico", 10, "history"),
-                    ("Gráficos e análises", 11, "charts"),
-                    ("Investimentos", 12, "investments"),
-                ],
-            ),
-            (
-                "Cadastros",
-                [
-                    ("Contas e cartões", 2, "accounts"),
-                    ("Categorias", 3, "categories"),
-                    ("Renda", 1, "income"),
+                    ("Início", self.IDX_DASHBOARD, "dashboard"),
+                    ("Despesas", self.IDX_DESPESAS, "payments"),
+                    ("Receitas", self.IDX_RECEITAS, "income"),
+                    ("Cartões", self.IDX_CARTOES, "card_invoices"),
+                    ("Contas", self.IDX_CONTAS, "accounts"),
+                    ("Investimentos", self.IDX_INVEST, "investments"),
+                    ("Análises", self.IDX_ANALISES, "charts"),
                 ],
             ),
         ]
@@ -280,6 +353,7 @@ class MainWindow(QMainWindow):
                 leaf.setFlags(
                     Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
                 )
+                self._nav_index_to_item[stack_idx] = leaf
 
         tree.expandAll()
         first_leaf = tree.topLevelItem(0).child(0)
@@ -289,13 +363,75 @@ class MainWindow(QMainWindow):
         self._nav_tree = tree
         self._apply_sidebar_section_muted()
 
+        self._icon_bar = QWidget()
+        ib_lay = QVBoxLayout(self._icon_bar)
+        ib_lay.setContentsMargins(4, 8, 4, 8)
+        ib_lay.setSpacing(4)
+        for _g, items in self._nav_entries():
+            for label, stack_idx, icon_key in items:
+                tb = QToolButton()
+                tb.setIcon(nav_icon(icon_key, self.style()))
+                tb.setToolTip(label)
+                tb.setAutoRaise(True)
+                tb.clicked.connect(
+                    lambda checked=False, i=stack_idx: self._goto_page_from_icon(i)
+                )
+                ib_lay.addWidget(tb)
+        ib_lay.addStretch()
+        self._icon_bar.hide()
+
+        self._btn_sidebar_toggle = QToolButton()
+        self._btn_sidebar_toggle.setObjectName("SidebarToggle")
+        self._btn_sidebar_toggle.setText("«")
+        self._btn_sidebar_toggle.setToolTip("Recolher barra lateral")
+        self._btn_sidebar_toggle.clicked.connect(self._toggle_sidebar_collapsed)
+
+        top_row = QWidget()
+        tr = QVBoxLayout(top_row)
+        tr.setContentsMargins(0, 0, 0, 0)
+        tr.setSpacing(0)
+        h = QWidget()
+        hl = QVBoxLayout(h)
+        hl.setContentsMargins(12, 8, 12, 0)
+        hl.addWidget(self._btn_sidebar_toggle, 0, Qt.AlignmentFlag.AlignRight)
+        tr.addWidget(h)
+        tr.addWidget(title)
+        tr.addWidget(subtitle)
+        tr.addWidget(tree, 1)
+        tr.addWidget(self._icon_bar, 1)
+
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addWidget(tree, 1)
+        layout.addWidget(top_row)
+        self._sidebar_title = title
+        self._sidebar_subtitle = subtitle
+        self._sidebar_tree_widget = tree
         return sidebar
+
+    def _goto_page_from_icon(self, idx: int) -> None:
+        self._goto_page(idx)
+
+    def _toggle_sidebar_collapsed(self) -> None:
+        self._sidebar_collapsed = not self._sidebar_collapsed
+        if self._sidebar_collapsed:
+            self._sidebar_tree_widget.hide()
+            self._icon_bar.show()
+            self._sidebar_title.hide()
+            self._sidebar_subtitle.hide()
+            self.sidebar.setMinimumWidth(72)
+            self._btn_sidebar_toggle.setText("»")
+            self._btn_sidebar_toggle.setToolTip("Expandir barra lateral")
+        else:
+            self._icon_bar.hide()
+            self._sidebar_tree_widget.show()
+            self._sidebar_title.show()
+            self._sidebar_subtitle.show()
+            content_px = self._sidebar_content_minimum_px()
+            self.sidebar.setMinimumWidth(content_px)
+            self._btn_sidebar_toggle.setText("«")
+            self._btn_sidebar_toggle.setToolTip("Recolher barra lateral")
+        self._sync_splitter_to_available_width()
 
     def _sidebar_section_muted_color(self) -> QColor:
         app = QApplication.instance()
@@ -346,18 +482,15 @@ class MainWindow(QMainWindow):
 
         def refresh_all() -> None:
             self.dashboard.reload()
-            self.history.reload()
-            self.charts_view.reload()
-            self.calendar_page.reload()
-            self.investments.reload()
+            self.section_analises.reload()
+            self.section_invest.reload()
 
         def refresh_lists() -> None:
-            self.payments.reload()
-            self.installments.reload()
-            self.subscriptions.reload()
-            self.fixed_expenses.reload()
-            self.card_invoices.reload()
+            self.section_despesas.reload()
             self.income_sources.reload()
+            self.section_cartoes.reload()
+            self.section_contas.reload()
+            self.categories.reload()
 
         def on_domain_change() -> None:
             refresh_all()
@@ -366,7 +499,6 @@ class MainWindow(QMainWindow):
         def on_accounts_change() -> None:
             refresh_all()
             refresh_lists()
-            self.accounts_cards.reload()
 
         for sig in (
             ev.payments_changed,
@@ -381,12 +513,12 @@ class MainWindow(QMainWindow):
 
         ev.accounts_changed.connect(on_accounts_change)
         ev.investments_changed.connect(refresh_all)
+        ev.investment_goals_changed.connect(refresh_all)
 
-    def _setup_theme_menu(self) -> None:
+    def _setup_menus(self) -> None:
         bar = QMenuBar(self)
         self.setMenuBar(bar)
-        menu = bar.addMenu("Exibir")
-
+        view_menu = bar.addMenu("Exibir")
         self._act_theme_light = QAction("Tema claro", self)
         self._act_theme_light.setCheckable(True)
         self._act_theme_dark = QAction("Tema escuro", self)
@@ -395,15 +527,76 @@ class MainWindow(QMainWindow):
         group.setExclusive(True)
         group.addAction(self._act_theme_light)
         group.addAction(self._act_theme_dark)
-        menu.addAction(self._act_theme_light)
-        menu.addAction(self._act_theme_dark)
+        view_menu.addAction(self._act_theme_light)
+        view_menu.addAction(self._act_theme_dark)
         group.triggered.connect(self._on_theme_menu)
+
+        self._act_density_comfort = QAction("Densidade: confortável", self)
+        self._act_density_comfort.setCheckable(True)
+        self._act_density_compact = QAction("Densidade: compacta", self)
+        self._act_density_compact.setCheckable(True)
+        dg = QActionGroup(self)
+        dg.setExclusive(True)
+        dg.addAction(self._act_density_comfort)
+        dg.addAction(self._act_density_compact)
+        view_menu.addSeparator()
+        view_menu.addAction(self._act_density_comfort)
+        view_menu.addAction(self._act_density_compact)
+        dg.triggered.connect(self._on_density_menu)
+
+        self._act_font_normal = QAction("Tamanho da fonte: padrão", self)
+        self._act_font_normal.setCheckable(True)
+        self._act_font_large = QAction("Tamanho da fonte: maior", self)
+        self._act_font_large.setCheckable(True)
+        fg = QActionGroup(self)
+        fg.setExclusive(True)
+        fg.addAction(self._act_font_normal)
+        fg.addAction(self._act_font_large)
+        view_menu.addSeparator()
+        view_menu.addAction(self._act_font_normal)
+        view_menu.addAction(self._act_font_large)
+        fg.triggered.connect(self._on_font_menu)
+
+        cad = bar.addMenu("Cadastros")
+        cad.addAction("Categorias…", self._open_categories_page)
 
         stored = QSettings().value("ui/theme", THEME_LIGHT)
         if stored == THEME_DARK:
             self._act_theme_dark.setChecked(True)
         else:
             self._act_theme_light.setChecked(True)
+
+        dens = QSettings().value("ui/density", "comfortable")
+        if dens == "compact":
+            self._act_density_compact.setChecked(True)
+        else:
+            self._act_density_comfort.setChecked(True)
+
+        fs = QSettings().value("ui/font_scale", "normal")
+        if fs == "large":
+            self._act_font_large.setChecked(True)
+        else:
+            self._act_font_normal.setChecked(True)
+
+    def _on_density_menu(self, action: QAction) -> None:
+        d = "compact" if action is self._act_density_compact else "comfortable"
+        QSettings().setValue("ui/density", d)
+        self._reapply_theme()
+
+    def _on_font_menu(self, action: QAction) -> None:
+        s = "large" if action is self._act_font_large else "normal"
+        QSettings().setValue("ui/font_scale", s)
+        self._reapply_theme()
+
+    def _reapply_theme(self) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        theme = QSettings().value("ui/theme", THEME_LIGHT)
+        if theme not in (THEME_LIGHT, THEME_DARK):
+            theme = THEME_LIGHT
+        apply_theme(app, theme)
+        self._apply_sidebar_section_muted()
 
     def _on_theme_menu(self, action: QAction) -> None:
         app = QApplication.instance()

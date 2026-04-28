@@ -628,6 +628,25 @@ def _migrate_investments_tables(conn) -> None:
     )
 
 
+def _migrate_investment_goals(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS investment_goals (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome         TEXT    NOT NULL,
+            valor_alvo   REAL    NOT NULL,
+            category_id  INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+            data_alvo    TEXT,
+            observacao   TEXT,
+            ativo        INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_investment_goals_category ON investment_goals(category_id)"
+    )
+
+
 def _migrate_coerce_non_positive_valores(conn) -> None:
     """Garante valores > 0 alinhados ao CHECK do schema (bancos legados)."""
     pairs = (
@@ -667,6 +686,7 @@ def run_migrations() -> None:
         _migrate_card_invoices_table(conn)
         _migrate_card_invoices_historico(conn)
         _migrate_investments_tables(conn)
+        _migrate_investment_goals(conn)
         _migrate_accounts_saldo_e_transacoes(conn)
         _migrate_income_sources_account_id(conn)
         _migrate_income_sources_avulsas_parceladas(conn)

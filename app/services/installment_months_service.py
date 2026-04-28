@@ -7,6 +7,7 @@ from typing import Optional
 from app.database.connection import use
 from app.events import app_events
 from app.models.income_source import competencias_parcelada
+from app.models.installment import schedule_parcel_amounts
 from app.repositories import installment_months_repo
 from app.services import accounts_service
 from app.services._monthly_ledger import MonthlyLedgerService
@@ -85,9 +86,18 @@ class _InstallmentMonthLedger(MonthlyLedgerService):
                     app_events().installments_changed.emit()
                     return
                 data = data_iso_no_mes(ym, 15)
+                n_par = int(inst["total_parcelas"] or 0)
+                vp = float(inst["valor_parcela"] or 0)
+                total_contrato = round(vp * n_par, 2) if n_par > 0 else 0.0
+                amounts = schedule_parcel_amounts(total_contrato, n_par)
+                parcela_valor = (
+                    amounts[slot_idx]
+                    if 0 <= slot_idx < len(amounts)
+                    else vp
+                )
                 accounts_service.upsert_transaction(
                     int(inst["account_id"]),
-                    -float(inst["valor_parcela"]),
+                    -parcela_valor,
                     data,
                     "parcela",
                     key,

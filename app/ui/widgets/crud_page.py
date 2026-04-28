@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import List
 
+from collections.abc import Callable
+
 from PySide6.QtCore import (
     QAbstractTableModel,
     QCollator,
@@ -136,6 +138,8 @@ class CrudPage(QWidget):
         self.btn_refresh = QPushButton("Atualizar")
         self.btn_refresh.setToolTip("Recarregar dados da tabela a partir do banco")
 
+        self.btn_primary_extra: QPushButton | None = None
+
         self.ed_search = QLineEdit()
         self.ed_search.setPlaceholderText("Buscar…")
         self.ed_search.setClearButtonEnabled(True)
@@ -199,10 +203,18 @@ class CrudPage(QWidget):
         self.ed_search.textChanged.connect(self._on_search_changed)
 
         outer = QVBoxLayout(self)
+        self._main_layout = outer
         outer.setContentsMargins(24, 24, 24, 24)
         outer.setSpacing(16)
         outer.addLayout(header_box)
         outer.addLayout(self.toolbar_layout)
+        self._filter_wrap = QWidget()
+        self._filter_layout = QHBoxLayout(self._filter_wrap)
+        self._filter_layout.setContentsMargins(0, 0, 0, 0)
+        self._filter_layout.setSpacing(8)
+        self._filter_wrap.setVisible(False)
+        self._filter_chip_group: list[QPushButton] = []
+        outer.addWidget(self._filter_wrap)
         outer.addWidget(self.totals_wrap)
         outer.addWidget(self.table, 1)
         outer.addWidget(self.footer_frame)
@@ -241,3 +253,47 @@ class CrudPage(QWidget):
         if not src.isValid():
             return None
         return self.model.row_id(src.row())
+
+    def set_primary_action(self, text: str, slot: Callable[[], None]) -> None:
+        if self.btn_primary_extra is not None:
+            self.toolbar_layout.removeWidget(self.btn_primary_extra)
+            self.btn_primary_extra.deleteLater()
+            self.btn_primary_extra = None
+        btn = QPushButton(text)
+        btn.clicked.connect(slot)
+        self.toolbar_layout.insertWidget(1, btn)
+        self.btn_primary_extra = btn
+
+    def add_filter_chips(self, specs: list[tuple[str, str]]) -> None:
+        while self._filter_layout.count():
+            item = self._filter_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._filter_chip_group.clear()
+        first = True
+        for cid, label in specs:
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setObjectName("ChipFilter")
+            b.setProperty("chipId", cid)
+            if first:
+                b.setChecked(True)
+                first = False
+            b.clicked.connect(lambda _c=False, btn=b: self._on_chip_clicked(btn))
+            self._filter_layout.addWidget(b)
+            self._filter_chip_group.append(b)
+        self._filter_layout.addStretch()
+        self._filter_wrap.setVisible(bool(specs))
+
+    def _on_chip_clicked(self, clicked: QPushButton) -> None:
+        if not clicked.isChecked():
+            clicked.setChecked(True)
+            return
+        for b in self._filter_chip_group:
+            if b is not clicked:
+                b.setChecked(False)
+        cid = clicked.property("chipId")
+        self.on_filter_chip_selected(str(cid) if cid is not None else "")
+
+    def on_filter_chip_selected(self, chip_id: str) -> None:
+        pass

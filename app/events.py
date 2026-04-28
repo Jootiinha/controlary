@@ -14,6 +14,7 @@ class AppEvents(QObject):
     accounts_changed = Signal()
     categories_changed = Signal()
     investments_changed = Signal()
+    investment_goals_changed = Signal()
 
     _instance: AppEvents | None = None
 

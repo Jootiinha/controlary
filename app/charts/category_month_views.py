@@ -163,6 +163,9 @@ def _parse_ledger_key(
     if transaction_key.startswith("income:"):
         return [(_CAT_OTHER, amount)]
 
+    if transaction_key.startswith("transfer:"):
+        return []
+
     if transaction_key.startswith("adjustment:"):
         return []
 
@@ -181,6 +184,8 @@ def fetch_ledger_by_category(ano_mes: str) -> list[tuple[str, float]]:
                AND NOT (
                    COALESCE(origem, '') = 'ajuste'
                    OR COALESCE(transaction_key, '') LIKE 'adjustment:%'
+                   OR COALESCE(origem, '') = 'transferencia'
+                   OR COALESCE(transaction_key, '') LIKE 'transfer:%'
                )
             """,
             (ano_mes,),

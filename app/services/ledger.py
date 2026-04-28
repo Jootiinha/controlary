@@ -26,3 +26,11 @@ class LedgerKey:
     @staticmethod
     def income(src_id: int, ano_mes: object) -> str:
         return f"income:{src_id}:{str(ano_mes)}"
+
+    @staticmethod
+    def transfer_debit(uuid_hex: str) -> str:
+        return f"transfer:{uuid_hex}:debit"
+
+    @staticmethod
+    def transfer_credit(uuid_hex: str) -> str:
+        return f"transfer:{uuid_hex}:credit"

@@ -74,6 +74,22 @@ def list_account_ids(conn: sqlite3.Connection) -> list[int]:
     return [int(r["id"]) for r in rows]
 
 
+def list_recent_with_account(
+    conn: sqlite3.Connection, *, limit: int = 500
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT t.id, t.account_id, a.nome AS conta_nome, t.data, t.valor,
+               t.origem, t.descricao, t.transaction_key
+          FROM account_transactions t
+          JOIN accounts a ON a.id = t.account_id
+         ORDER BY date(t.data) DESC, t.id DESC
+         LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+
 def sum_debits_in_month(conn: sqlite3.Connection, ano_mes: str) -> float:
     row = conn.execute(
         """
@@ -84,6 +100,8 @@ def sum_debits_in_month(conn: sqlite3.Connection, ano_mes: str) -> float:
            AND NOT (
                COALESCE(origem, '') = 'ajuste'
                OR COALESCE(transaction_key, '') LIKE 'adjustment:%'
+               OR COALESCE(origem, '') = 'transferencia'
+               OR COALESCE(transaction_key, '') LIKE 'transfer:%'
            )
         """,
         (ano_mes,),

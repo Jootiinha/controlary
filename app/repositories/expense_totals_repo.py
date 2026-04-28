@@ -12,12 +12,13 @@ def sum_account_debits_excl_fatura(conn: sqlite3.Connection, ano_mes: str) -> fl
           FROM account_transactions
          WHERE substr(data, 1, 7) = ?
            AND valor < 0
-           AND COALESCE(origem, '') NOT IN ('fatura', 'ajuste')
+           AND COALESCE(origem, '') NOT IN ('fatura', 'ajuste', 'transferencia')
            AND COALESCE(transaction_key, '') NOT LIKE 'adjustment:%'
+           AND COALESCE(transaction_key, '') NOT LIKE 'transfer:%'
         """,
         (ano_mes,),
     ).fetchone()
-    return abs(float(row["t"] or 0))
+    return round(abs(float(row["t"] or 0)), 2)
 
 
 def sum_card_payments_month(conn: sqlite3.Connection, ano_mes: str) -> float:
@@ -30,7 +31,7 @@ def sum_card_payments_month(conn: sqlite3.Connection, ano_mes: str) -> float:
         """,
         (ano_mes,),
     ).fetchone()
-    return float(row["t"] or 0)
+    return round(float(row["t"] or 0), 2)
 
 
 def sum_received_income_months(conn: sqlite3.Connection, ano_mes: str) -> float:
